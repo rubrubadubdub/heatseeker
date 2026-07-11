@@ -469,6 +469,9 @@ class ResearchScope(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     geo_codes: Mapped[list] = mapped_column(JSON, default=list)
+    # Geographies to carve out of the scope. A source is dropped only when its entire
+    # known footprint falls inside these codes (geography.excluded_by).
+    exclude_codes: Mapped[list] = mapped_column(JSON, default=list)
     industry_ids: Mapped[list] = mapped_column(JSON, default=list)
     target_filters: Mapped[dict] = mapped_column(JSON, default=dict)
     include_unknown: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -483,6 +486,30 @@ class ResearchScope(Base):
             unique=True,
             sqlite_where=text("is_active = 1"),
         ),
+    )
+
+
+class GeoRegion(Base):
+    """A named geography region as data (ADR-0012): user-editable membership.
+
+    Rows are the source of truth for the in-process registry in
+    heatseeker_core_domain.geography; builtins are seeded on first boot and stay
+    editable, but cannot be deleted (scopes may reference them by habit and name).
+    """
+
+    __tablename__ = "geo_region"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    code: Mapped[str] = mapped_column(String(50), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
+    member_codes: Mapped[list] = mapped_column(JSON, default=list)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+
+    __table_args__ = (
+        CheckConstraint("length(trim(code)) >= 3 AND length(code) <= 50", name="code_length"),
+        CheckConstraint("length(trim(name)) >= 1 AND length(name) <= 200", name="name_length"),
     )
 
 

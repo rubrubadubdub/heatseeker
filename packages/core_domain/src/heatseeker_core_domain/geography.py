@@ -1,7 +1,8 @@
 """Generic geography codes and scope matching (spec §6.5: geography is a core concept).
 
 Code forms (hierarchical, prefix-based):
-  Macro region:  APAC, ANZ, NORTH_AMERICA, EUROPE, GLOBAL
+  Named region:  APAC, ANZ, LATAM, MIDDLE_EAST, ... — a registered set of codes; GLOBAL
+                 is special-cased to match everything
   Country:       ISO 3166-1 alpha-2 (AU, NZ, US, GB, ...)
   Subdivision:   ISO 3166-2 (AU-QLD, US-WA, AU-VIC, ...)
   Locality:      subdivision + slug (AU-VIC-MELBOURNE) or country + slug (NZ-AUCKLAND)
@@ -11,55 +12,198 @@ scope code. A national source (AU) covers Queensland research (AU-QLD); a Queens
 source is relevant to an Australia-wide scope. GLOBAL matches everything.
 
 Directional callers can choose exact, covers, or within instead of symmetric overlap;
-macro-region coverage is set-aware (AU does not claim to cover all of ANZ).
+named-region coverage is set-aware (AU does not claim to cover all of ANZ).
+
+Named regions are **data, not code**: the module ships builtin defaults (below), and the
+application layer replaces the working registry from the database via
+``set_macro_regions`` (see heatseeker_source_registry.regions). Region members may be
+countries or hierarchical codes (a "PACIFIC_NORTHWEST" of US-WA, US-OR, CA-BC is valid);
+regions may not nest.
 """
 
 import enum
 import re
+from collections.abc import Iterable, Mapping
 
-# Macro regions expand to country sets. Editable/extensible; not exhaustive gazetteers.
-MACRO_REGIONS: dict[str, set[str]] = {
-    "GLOBAL": set(),  # special-cased: matches everything
-    "ANZ": {"AU", "NZ"},
-    "APAC": {
-        "AU",
-        "NZ",
-        "JP",
-        "KR",
-        "CN",
-        "TW",
-        "HK",
-        "SG",
-        "MY",
-        "TH",
-        "VN",
-        "PH",
-        "ID",
-        "IN",
-        "PG",
-        "FJ",
-    },
-    "NORTH_AMERICA": {"US", "CA", "MX"},
-    "EUROPE": {
-        "GB",
-        "IE",
-        "FR",
-        "DE",
-        "NL",
-        "BE",
-        "ES",
-        "PT",
-        "IT",
-        "CH",
-        "AT",
-        "DK",
-        "SE",
-        "NO",
-        "FI",
-        "PL",
-        "CZ",
-    },
+# Builtin named-region defaults. These seed the database on first boot and are the
+# fallback when no database-backed registry has been loaded (e.g. pure unit tests).
+# They are starting points, not gazetteers — users edit the live registry in the GUI.
+_BUILTIN_MACRO_REGIONS: dict[str, frozenset[str]] = {
+    "GLOBAL": frozenset(),  # special-cased: matches everything
+    "ANZ": frozenset({"AU", "NZ"}),
+    "APAC": frozenset(
+        {
+            "AU",
+            "NZ",
+            "JP",
+            "KR",
+            "CN",
+            "TW",
+            "HK",
+            "SG",
+            "MY",
+            "TH",
+            "VN",
+            "PH",
+            "ID",
+            "IN",
+            "PG",
+            "FJ",
+            "BD",
+            "LK",
+            "MM",
+            "KH",
+            "LA",
+            "BN",
+            "NP",
+            "PK",
+            "MO",
+            "TL",
+        }
+    ),
+    "NORTH_AMERICA": frozenset({"US", "CA", "MX"}),
+    "LATAM": frozenset(
+        {
+            "MX",
+            "BR",
+            "AR",
+            "CL",
+            "CO",
+            "PE",
+            "EC",
+            "UY",
+            "PY",
+            "BO",
+            "VE",
+            "CR",
+            "PA",
+            "GT",
+            "HN",
+            "SV",
+            "NI",
+            "DO",
+            "CU",
+        }
+    ),
+    "EUROPE": frozenset(
+        {
+            "GB",
+            "IE",
+            "FR",
+            "DE",
+            "NL",
+            "BE",
+            "ES",
+            "PT",
+            "IT",
+            "CH",
+            "AT",
+            "DK",
+            "SE",
+            "NO",
+            "FI",
+            "PL",
+            "CZ",
+            "GR",
+            "RO",
+            "HU",
+            "SK",
+            "SI",
+            "HR",
+            "BG",
+            "EE",
+            "LV",
+            "LT",
+            "LU",
+            "IS",
+            "MT",
+            "CY",
+        }
+    ),
+    "MIDDLE_EAST": frozenset(
+        {
+            "AE",
+            "SA",
+            "QA",
+            "KW",
+            "BH",
+            "OM",
+            "IL",
+            "JO",
+            "LB",
+            "IQ",
+            "IR",
+            "TR",
+            "YE",
+        }
+    ),
+    "AFRICA": frozenset(
+        {
+            "ZA",
+            "NG",
+            "KE",
+            "EG",
+            "MA",
+            "TN",
+            "DZ",
+            "GH",
+            "ET",
+            "TZ",
+            "UG",
+            "ZM",
+            "ZW",
+            "BW",
+            "NA",
+            "MZ",
+            "SN",
+            "CI",
+            "CM",
+            "RW",
+        }
+    ),
 }
+
+# Working registry consulted by all matching/validation below. Replaced wholesale by
+# set_macro_regions() when the database-backed registry loads; defaults to builtins.
+MACRO_REGIONS: dict[str, set[str]] = {
+    code: set(members) for code, members in _BUILTIN_MACRO_REGIONS.items()
+}
+
+# Display names for database-defined regions (overlays KNOWN_CODES in describe()).
+_REGION_NAMES: dict[str, str] = {}
+
+
+def builtin_macro_regions() -> dict[str, set[str]]:
+    """Copy of the shipped defaults, for seeding the database-backed registry."""
+    return {code: set(members) for code, members in _BUILTIN_MACRO_REGIONS.items()}
+
+
+def set_macro_regions(
+    regions: Mapping[str, Iterable[str]], names: Mapping[str, str] | None = None
+) -> None:
+    """Replace the working named-region registry (called by the DB-backed loader).
+
+    GLOBAL is always present and always empty — it matches by special case, not by
+    membership, and must not be redefined into something narrower.
+    """
+    MACRO_REGIONS.clear()
+    MACRO_REGIONS["GLOBAL"] = set()
+    for code, members in regions.items():
+        normalised = normalise_code(code)
+        if normalised == "GLOBAL":
+            continue
+        MACRO_REGIONS[normalised] = {normalise_code(m) for m in members}
+    _REGION_NAMES.clear()
+    if names:
+        _REGION_NAMES.update({normalise_code(code): name for code, name in names.items()})
+
+
+def reset_macro_regions() -> None:
+    """Restore the builtin defaults (test isolation)."""
+    MACRO_REGIONS.clear()
+    MACRO_REGIONS.update(builtin_macro_regions())
+    _REGION_NAMES.clear()
+
 
 # Display names for common codes (free-form codes beyond these are still valid).
 KNOWN_CODES: dict[str, str] = {
@@ -67,7 +211,10 @@ KNOWN_CODES: dict[str, str] = {
     "ANZ": "Australia & New Zealand",
     "APAC": "Asia-Pacific",
     "NORTH_AMERICA": "North America",
+    "LATAM": "Latin America",
     "EUROPE": "Europe",
+    "MIDDLE_EAST": "Middle East",
+    "AFRICA": "Africa",
     "AU": "Australia",
     "NZ": "New Zealand",
     "US": "United States",
@@ -90,6 +237,9 @@ KNOWN_CODES: dict[str, str] = {
 
 _COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
 _HIERARCHICAL_RE = re.compile(r"^[A-Z]{2}(?:-[A-Z0-9][A-Z0-9_]{0,49})+$")
+# Named-region codes: ≥3 chars (no ISO-country collision), no hyphens (reserved for
+# the hierarchy), letters/digits/underscores.
+_REGION_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,49}$")
 
 
 class GeographyMatchMode(enum.StrEnum):
@@ -127,6 +277,44 @@ def validate_code(raw: str) -> str:
         f"invalid geography code {raw!r}; use a registered macro, ISO country, "
         "or hierarchical code such as AU-QLD"
     )
+
+
+def validate_region_definition(code_raw: str, members_raw: Iterable[str]) -> tuple[str, list[str]]:
+    """Validate a named-region definition at input boundaries (region editor, API).
+
+    Members must be countries, subdivisions, or localities — regions may not nest, and
+    GLOBAL is not definable. Returns (code, sorted member codes).
+    """
+    code = normalise_code(code_raw)
+    if code == "GLOBAL":
+        raise InvalidGeographyCode("GLOBAL is built in and cannot be redefined")
+    if not _REGION_CODE_RE.fullmatch(code):
+        raise InvalidGeographyCode(
+            f"invalid region code {code_raw!r}; use 3-50 chars of A-Z, 0-9, _ "
+            "(no hyphens — those are reserved for country subdivisions)"
+        )
+    members: list[str] = []
+    seen: set[str] = set()
+    for raw in members_raw:
+        member = normalise_code(raw)
+        if not member:
+            continue
+        if not (_COUNTRY_RE.fullmatch(member) or _HIERARCHICAL_RE.fullmatch(member)):
+            if member == "GLOBAL" or member in MACRO_REGIONS or _REGION_CODE_RE.fullmatch(member):
+                raise InvalidGeographyCode(
+                    f"region member {raw!r} looks like another named region; "
+                    "regions may not nest — list countries or subdivisions directly"
+                )
+            raise InvalidGeographyCode(
+                f"invalid region member {raw!r}; use ISO countries (AU) or "
+                "hierarchical codes (US-WA)"
+            )
+        if member not in seen:
+            seen.add(member)
+            members.append(member)
+    if not members:
+        raise InvalidGeographyCode("a named region needs at least one member code")
+    return code, sorted(members)
 
 
 def normalise_codes(codes: list[str], *, validate: bool = False) -> list[str]:
@@ -174,19 +362,30 @@ def _ancestor(ancestor: str, descendant: str) -> bool:
 
 
 def _covers(covering: str, requested: str) -> bool:
-    """Whether one explicit code covers the whole requested code."""
+    """Whether one explicit code covers the whole requested code.
+
+    Named-region members may be countries or subdivisions, so coverage is judged by
+    ancestry against each member, not by bare set inclusion.
+    """
     if covering == "GLOBAL":
         return True
     if requested == "GLOBAL":
         return False
-    covering_macro = MACRO_REGIONS.get(covering)
-    requested_macro = MACRO_REGIONS.get(requested)
-    if covering_macro is not None:
-        if requested_macro is not None:
-            return requested_macro <= covering_macro
-        return requested.split("-", 1)[0] in covering_macro
-    if requested_macro is not None:
-        return False
+    covering_members = MACRO_REGIONS.get(covering)
+    requested_members = MACRO_REGIONS.get(requested)
+    if covering_members is not None:
+        if requested_members is not None:
+            if not requested_members:
+                return False
+            return all(
+                any(_ancestor(member, wanted) for member in covering_members)
+                for wanted in requested_members
+            )
+        return any(_ancestor(member, requested) for member in covering_members)
+    if requested_members is not None:
+        if not requested_members:
+            return False
+        return all(_ancestor(covering, member) for member in requested_members)
     return _ancestor(covering, requested)
 
 
@@ -240,6 +439,21 @@ def match_geography(
     return any(_related(item, wanted) for item in items for wanted in requested)
 
 
+def excluded_by(item_codes: list[str], exclude_codes: list[str]) -> bool:
+    """True when a non-empty geographic footprint lies entirely inside the excluded area.
+
+    Deliberately conservative: 'APAC minus China' still wants APAC-wide sources, so a
+    source reaching beyond the exclusion is kept — only sources operating wholly inside
+    it are dropped. Unknown footprints are never excluded (missing ≠ false; the scope's
+    include_unknown flag governs those separately).
+    """
+    items = set(normalise_codes(item_codes))
+    excludes = set(normalise_codes(exclude_codes))
+    if not items or not excludes:
+        return False
+    return all(any(_covers(exclude, item) for exclude in excludes) for item in items)
+
+
 def in_scope(item_codes: list[str], scope_codes: list[str]) -> bool:
     """Ancestor-or-descendant match between an item's codes and a scope's codes.
 
@@ -250,4 +464,5 @@ def in_scope(item_codes: list[str], scope_codes: list[str]) -> bool:
 
 
 def describe(code: str) -> str:
-    return KNOWN_CODES.get(normalise_code(code), code)
+    normalised = normalise_code(code)
+    return _REGION_NAMES.get(normalised) or KNOWN_CODES.get(normalised, code)

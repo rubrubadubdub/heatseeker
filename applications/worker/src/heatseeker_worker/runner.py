@@ -100,6 +100,11 @@ class WorkerRunner:
         """
         self.register()
         self.reap_stale()
+        # Named regions are data (ADR-0012): handler-side matching must see DB-defined
+        # regions even when the worker runs as a separate process from the GUI.
+        from heatseeker_source_registry.regions import load_regions_if_available
+
+        load_regions_if_available(self.engine)
         executed = 0
         last_heartbeat = time.monotonic()
         last_autopilot = 0.0  # fire on first pass so a fresh install starts collecting

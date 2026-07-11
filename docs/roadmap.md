@@ -14,7 +14,7 @@ detail: read the spec section for the milestone via
 | M1 | Industry-pack framework | **Done** (2026-07-11; hardened same day) | [M1-industry-packs.md](milestones/M1-industry-packs.md) | Rubrics/lead rules deferred to M5/M8 |
 | UI | Browser GUI foundation (early, ADR-0009) | **Done** (2026-07-11, verified live) | — | Dashboard, jobs, packs, backups, health at `/`; API moved to `/api/*` |
 | M2 | Source registry & evidence store | **Done** (2026-07-11, targeting hardened) | [M2-source-registry.md](milestones/M2-source-registry.md) | Contextual industry/region/facet coverage; ADR-0010 |
-| — | Research scopes (tunable geo targeting: ANZ/APAC/custom states+cities) | **Done** (2026-07-11) | see M2 brief | M5+ must consume `scopes.active_scope()` |
+| — | Research scopes (tunable geo targeting: ANZ/APAC/custom states+cities) | **Done** (2026-07-11; regions-as-data + exclusions added same day, ADR-0012) | see M2 brief | M5+ must consume `scopes.active_scope()` |
 | — | M2 robustness: grading, auto-deprecation, politeness, distillation (ADR-0011) | **Done** (2026-07-11) | see M2 brief | 98 tests green |
 | M3 | Responsible crawler | **Done** (2026-07-11, acceptance verified) | [M3-crawler.md](milestones/M3-crawler.md) | Incl. transitive backlink discovery (vocabulary-gated proposals) |
 | M4 | Entity core & resolution | Not started | — | |

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from heatseeker_source_registry.grading import evaluate_all
 from heatseeker_source_registry.models import RobotsStatus, SourceDefinition, SourceLifecycle
 from heatseeker_source_registry.policy import activation_blockers, check_robots
+from heatseeker_source_registry.regions import load_regions
 from heatseeker_source_registry.schedule import collect_due
 from heatseeker_source_registry.sync import sync_pack_seeds
 
@@ -101,6 +102,9 @@ def _maintenance_due(session: Session, settings: Settings) -> bool:
 def autopilot_tick(
     session: Session, settings: Settings, transport: httpx.BaseTransport | None = None
 ) -> dict:
+    # Refresh named regions from the DB so a separate-process worker sees GUI edits
+    # within one tick (ADR-0012).
+    load_regions(session)
     summary: dict = {"seeded": _bootstrap_seeds(session)}
     summary["policies_checked"] = _check_policies(session, settings, transport)
     summary["activated"] = _auto_activate(session)

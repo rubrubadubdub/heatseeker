@@ -4,7 +4,7 @@ research scopes, geography matching."""
 import httpx
 import pytest
 from heatseeker_common.db import session_scope
-from heatseeker_core_domain.geography import in_scope, parse_jurisdiction
+from heatseeker_core_domain.geography import excluded_by, in_scope, parse_jurisdiction
 from heatseeker_industry_packs.loader import default_packs_root, load_pack
 from heatseeker_source_registry import rawstore
 from heatseeker_source_registry.collect import collect_source
@@ -24,6 +24,7 @@ from heatseeker_source_registry.scopes import (
     source_in_scope,
 )
 from heatseeker_source_registry.sync import sync_pack_seeds
+from heatseeker_source_registry.targeting import CoverageSpec, TargetSpec, upsert_coverage
 
 
 def _make_source(session, **overrides) -> str:
@@ -256,6 +257,75 @@ def test_scopes_default_create_activate(engine):
         )
         assert source_in_scope(au_source, active_scope(session))  # AU covers AU-QLD
         assert not source_in_scope(nz_source, active_scope(session))  # NZ not in custom scope
+
+
+def test_excluded_by_only_drops_footprints_wholly_inside_exclusion():
+    assert excluded_by(["CN"], ["CN"])
+    assert excluded_by(["CN-BJ"], ["CN"])  # descendants are inside
+    assert excluded_by(["AU-QLD"], ["ANZ"])  # named region covers member subdivisions
+    assert not excluded_by(["CN", "AU"], ["CN"])  # reaches beyond the exclusion — kept
+    assert not excluded_by(["APAC"], ["CN"])  # region-wide source stays relevant
+    assert not excluded_by([], ["CN"])  # unknown footprint: missing ≠ false
+    assert not excluded_by(["CN"], [])  # no exclusions configured
+
+
+def test_scope_exclusions_carve_out_sources(engine):
+    with session_scope(engine) as session:
+        scope = create_scope(session, "APAC minus China", "APAC", exclude_raw="CN")
+        assert scope.exclude_codes == ["CN"]
+
+        def src(name, codes):
+            return SourceDefinition(
+                name=name,
+                source_category="news",
+                access_method="html",
+                geo_codes=codes,
+                authority_tier=4,
+            )
+
+        assert not source_in_scope(src("CN national", ["CN"]), scope)
+        assert not source_in_scope(src("Shanghai metro", ["CN-SH"]), scope)
+        assert source_in_scope(src("AU national", ["AU"]), scope)
+        assert source_in_scope(src("APAC-wide association", ["APAC"]), scope)
+        assert source_in_scope(src("CN+AU multinational", ["CN", "AU"]), scope)
+
+        with pytest.raises(ValueError, match="GLOBAL"):
+            create_scope(session, "Nothing left", "APAC", exclude_raw="GLOBAL")
+
+
+def test_scope_exclusions_respect_coverage_granularity(engine):
+    with session_scope(engine) as session:
+        scope = create_scope(session, "APAC ex China", "APAC", exclude_raw="CN")
+
+        def coverage(key, region):
+            return CoverageSpec(
+                coverage_key=key,
+                targets=(TargetSpec("industry", "scaffolding_anz"), TargetSpec("region", region)),
+            )
+
+        cn_only = SourceDefinition(
+            name="China construction wire",
+            source_category="news",
+            access_method="html",
+            authority_tier=4,
+        )
+        multinational = SourceDefinition(
+            name="Regional construction wire",
+            source_category="news",
+            access_method="html",
+            authority_tier=4,
+        )
+        session.add_all([cn_only, multinational])
+        session.flush()
+        upsert_coverage(session, cn_only, coverage("cn", "CN"))
+        upsert_coverage(session, multinational, coverage("cn", "CN"))
+        upsert_coverage(session, multinational, coverage("au", "AU"))
+        session.flush()
+
+        # Every declared footprint inside the exclusion → carved out entirely.
+        assert not source_in_scope(cn_only, scope)
+        # The AU coverage survives the carve-out, so the source stays in scope.
+        assert source_in_scope(multinational, scope)
 
 
 # --- Raw store path safety --------------------------------------------------------

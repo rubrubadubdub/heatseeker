@@ -27,3 +27,4 @@ judgement but requires meaningful deviations to be documented — this is where.
 | [0009](0009-server-rendered-gui.md) | Server-rendered GUI: FastAPI + Jinja2 + Bootstrap 5 + htmx (vendored) | Accepted |
 | [0011](0011-collection-robustness.md) | Grading, auto-deprecation, politeness-not-evasion, storage/token economy | Accepted |
 | [0010](0010-contextual-source-coverage.md) | Contextual source coverage profiles | Accepted |
+| [0012](0012-geography-regions-as-data.md) | Named geography regions as data; scope exclusions | Accepted |
