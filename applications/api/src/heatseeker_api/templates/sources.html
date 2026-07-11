@@ -161,7 +161,8 @@ prohibited + source activated. Every action is audited.</p>
           </form>
         </td>
         <td>{{ doc_counts.get(s.id, 0) }}</td>
-        <td class="d-flex gap-1 flex-wrap">
+        <td>
+          <div class="d-flex gap-1 flex-wrap">
           {% if s.access_method != 'manual' %}
           <form method="post" action="/sources/{{ s.id }}/check-policy">
             <button class="btn btn-sm btn-outline-secondary py-0">robots?</button>
@@ -187,10 +188,11 @@ prohibited + source activated. Every action is audited.</p>
             <button class="btn btn-sm btn-outline-dark py-0">disable</button>
           </form>
           {% endif %}
+          </div>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="text-secondary">No sources yet — click
+      <tr><td colspan="9" class="text-secondary">No sources yet — click
         <strong>Sync from industry packs</strong> to import the scaffolding seed list.</td></tr>
       {% endfor %}
     </tbody>
