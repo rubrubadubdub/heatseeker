@@ -1,0 +1,20 @@
+[project]
+name = "heatseeker-industry-packs"
+version = "0.1.0"
+description = "Industry pack loader + validation (M1); pack data under packs/"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "heatseeker-common",
+]
+
+[tool.uv.sources]
+heatseeker-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/heatseeker_industry_packs"]

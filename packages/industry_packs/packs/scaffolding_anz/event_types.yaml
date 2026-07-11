@@ -1,0 +1,18 @@
+# Pack-specific event types extending the core taxonomy (spec §22.2).
+schema: event_types/v1
+event_types:
+  - {id: contract_award, name: Contract award}
+  - {id: tender_release, name: Tender release}
+  - {id: project_approval, name: Project approval}
+  - {id: major_project_commencement, name: Major project commencement}
+  - {id: new_branch, name: New branch or yard}
+  - {id: acquisition, name: Acquisition or merger}
+  - {id: insolvency, name: Insolvency or administration}
+  - {id: hiring_expansion, name: Hiring expansion}
+  - {id: design_role_advertised, name: Design/estimating role advertised}
+  - {id: safety_notice, name: Safety notice or enforcement}
+  - {id: regulation_change, name: Regulation or code change}
+  - {id: system_adoption, name: New scaffold system adoption}
+  - {id: shutdown_announced, name: Shutdown / turnaround announced}
+  - {id: framework_appointment, name: Framework appointment}
+  - {id: disaster_recovery, name: Natural-disaster recovery work}

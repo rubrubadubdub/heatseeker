@@ -1,0 +1,212 @@
+# Seed source list — scaffolding / temporary works pack (AU/NZ focus)
+# ---------------------------------------------------------------------------
+# EXPANDABLE: add entries here (git-reviewed) or via the source registry UI/CLI
+# once M2 lands. This list seeds the SourceDefinition registry (spec §10.2);
+# it never limits it — AI-assisted and deterministic expansion propose sources
+# beyond this list (docs/architecture/source-discovery.md).
+#
+# Every entry enters the registry as a CANDIDATE. Nothing is collected until
+# robots and terms are checked (spec §11.4). terms_status below is bookkeeping,
+# not permission. URLs/availability must be re-verified at M2 (spec §43).
+#
+# category: official_register | official_procurement | regulator | open_data |
+#           industry_association | manufacturer | directory | job_board |
+#           news | weak_signal
+# access:   api | bulk | rss | sitemap | html | manual
+# authority_tier: 1 (official record) .. 7 (unattributed/weak) — spec §10.3
+
+schema: seed_sources/v1
+pack: scaffolding_anz
+
+sources:
+  # --- Official and authoritative (tier 1-2) --------------------------------
+  - name: Australian Business Register (ABN Lookup web services)
+    category: official_register
+    url: https://abr.business.gov.au/Tools/WebServices
+    access: api
+    jurisdiction: AU
+    authority_tier: 1
+    terms_status: unreviewed
+    notes: Legal entity existence, status, location. Free API key. Spec §43.
+  - name: ASIC registers (via data.gov.au)
+    category: official_register
+    url: https://www.asic.gov.au/online-services/search-asic-registers/data-gov-au/
+    access: bulk
+    jurisdiction: AU
+    authority_tier: 1
+    terms_status: unreviewed
+    notes: Company register bulk extracts. Spec §43.
+  - name: New Zealand Business Number (NZBN) API
+    category: official_register
+    url: https://portal.api.business.govt.nz/api/nzbn
+    access: api
+    jurisdiction: NZ
+    authority_tier: 1
+    terms_status: unreviewed
+    notes: NZ entity data incl. trading names, addresses. Spec §43.
+  - name: NZ Companies Office register
+    category: official_register
+    url: https://companies-register.companiesoffice.govt.nz/
+    access: html
+    jurisdiction: NZ
+    authority_tier: 1
+    terms_status: unreviewed
+  - name: AusTender
+    category: official_procurement
+    url: https://www.tenders.gov.au/
+    access: html
+    jurisdiction: AU
+    authority_tier: 1
+    terms_status: unreviewed
+    notes: Federal tenders and contract awards — timing signals (spec §19.5).
+  - name: GETS (NZ Government Electronic Tenders Service)
+    category: official_procurement
+    url: https://www.gets.govt.nz/
+    access: html
+    jurisdiction: NZ
+    authority_tier: 1
+    terms_status: unreviewed
+  - name: SafeWork / WorkSafe state regulators (AU states + NZ)
+    category: regulator
+    url: https://www.safeworkaustralia.gov.au/
+    access: html
+    jurisdiction: AU/NZ
+    authority_tier: 2
+    terms_status: unreviewed
+    notes: Safety notices, enforcement, scaffolding codes of practice. One entry
+      per state regulator when registered at M2 (WorkSafe VIC/QLD/WA, SafeWork
+      NSW, WorkSafe NZ...).
+  - name: data.gov.au open datasets
+    category: open_data
+    url: https://data.gov.au/
+    access: api
+    jurisdiction: AU
+    authority_tier: 2
+    terms_status: unreviewed
+
+  # --- Industry sources (tier 3-4) ------------------------------------------
+  - name: SARNZ (Scaffolding, Access & Rigging NZ) member directory
+    category: industry_association
+    url: https://www.sarnz.org.nz/
+    access: html
+    jurisdiction: NZ
+    authority_tier: 3
+    terms_status: unreviewed
+    notes: Member lists = strong company-discovery source (spec §9.2).
+  - name: Hire and Rental Industry Association (HRIA)
+    category: industry_association
+    url: https://www.hireandrental.com.au/
+    access: html
+    jurisdiction: AU
+    authority_tier: 3
+    terms_status: unreviewed
+    notes: Access/scaffold hire members.
+  - name: Master Builders Australia (and state bodies)
+    category: industry_association
+    url: https://masterbuilders.com.au/
+    access: html
+    jurisdiction: AU
+    authority_tier: 3
+    terms_status: unreviewed
+  - name: Layher Australia (dealer/project pages)
+    category: manufacturer
+    url: https://www.layher.com.au/
+    access: html
+    jurisdiction: AU
+    authority_tier: 3
+    terms_status: unreviewed
+    notes: System-owner content — distributor and project evidence (ringlock/allround).
+  - name: RMD Kwikform (AU/NZ project pages)
+    category: manufacturer
+    url: https://rmdkwikform.com/
+    access: html
+    jurisdiction: AU/NZ
+    authority_tier: 3
+    terms_status: unreviewed
+
+  # --- Discovery and weak-signal (tier 5-7): hypotheses only, never facts ---
+  - name: Yellow Pages Australia
+    category: directory
+    url: https://www.yellowpages.com.au/
+    access: html
+    jurisdiction: AU
+    authority_tier: 5
+    terms_status: unreviewed
+    notes: Discovery only; directory pollution risk (spec §39.1).
+  - name: hipages (trades directory)
+    category: directory
+    url: https://hipages.com.au/
+    access: html
+    jurisdiction: AU
+    authority_tier: 5
+    terms_status: unreviewed
+  - name: SEEK job advertisements
+    category: job_board
+    url: https://www.seek.com.au/
+    access: html
+    jurisdiction: AU/NZ
+    authority_tier: 4
+    terms_status: unreviewed
+    notes: Hiring signals — designer/estimator ads are need indicators (spec §19.3).
+  - name: Indeed AU
+    category: job_board
+    url: https://au.indeed.com/
+    access: html
+    jurisdiction: AU
+    authority_tier: 4
+    terms_status: unreviewed
+  - name: GDELT global news/events
+    category: news
+    url: https://www.gdeltproject.org/
+    access: api
+    jurisdiction: global
+    authority_tier: 4
+    terms_status: unreviewed
+    notes: Macro/event stream input (spec §21-22, §43).
+  - name: Reddit — construction/scaffolding communities
+    category: weak_signal
+    url: https://www.reddit.com/
+    access: api
+    jurisdiction: global
+    authority_tier: 6
+    terms_status: unreviewed
+    notes: 'Weak-signal discovery: company mentions, vocabulary, market chatter.
+      Specific subreddits are registered individually at M2 after terms review;
+      AI expansion may propose more (docs/architecture/source-discovery.md).'
+  - name: Google Maps business listings
+    category: weak_signal
+    url: https://maps.google.com/
+    access: manual
+    jurisdiction: AU/NZ
+    authority_tier: 6
+    terms_status: unreviewed
+    notes: Manual/API-only workflow — no scraping; branch/yard discovery.
+  - name: Facebook public business pages
+    category: weak_signal
+    url: https://www.facebook.com/
+    access: manual
+    jurisdiction: AU/NZ
+    authority_tier: 6
+    terms_status: unreviewed
+    notes: Manual-only capture; many small operators are social-only (no website).
+
+# --- Expansion beyond this list --------------------------------------------
+discovery:
+  ai_expansion_enabled: true      # master switch; AI proposals only, never auto-crawl
+  proposals_require_approval: true
+  proposal_default_tier: 6        # AI-proposed sources start weak until proven
+  expansion_targets:              # where AI/deterministic discovery may look for NEW sources
+    - search_engines
+    - association_member_lists
+    - manufacturer_distributor_pages
+    - project_participant_pages
+    - reddit_and_forums
+    - regional_directories
+    - industry_newsletters
+  discovery_query_seeds:          # combined with pack synonyms to generate search queries
+    - "scaffolding contractor {region}"
+    - "scaffold hire {region}"
+    - "access equipment {region}"
+    - "temporary works design {region}"
+    - "scaffold design drafting services"
+    - "site:reddit.com scaffolding {region}"

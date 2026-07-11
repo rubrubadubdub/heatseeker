@@ -1,0 +1,19 @@
+# Sector exposure axis (spec §15.1).
+schema: market_segments/v1
+segments:
+  - {id: commercial_construction, name: Commercial construction}
+  - {id: residential_construction, name: Residential construction}
+  - {id: infrastructure, name: Infrastructure}
+  - {id: rail, name: Rail}
+  - {id: roads_bridges, name: Roads & bridges}
+  - {id: mining, name: Mining}
+  - {id: oil_gas, name: Oil & gas}
+  - {id: energy, name: Energy}
+  - {id: utilities, name: Utilities}
+  - {id: marine, name: Marine}
+  - {id: defence, name: Defence}
+  - {id: industrial_maintenance, name: Industrial maintenance}
+  - {id: manufacturing, name: Manufacturing}
+  - {id: events, name: Events}
+  - {id: heritage, name: Heritage}
+  - {id: public_sector, name: Public sector}

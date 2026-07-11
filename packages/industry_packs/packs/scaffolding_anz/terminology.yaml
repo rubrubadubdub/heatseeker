@@ -1,0 +1,36 @@
+schema: terminology/v1
+terms:
+  - term: scaffolding
+    synonyms: [scaffold, scaffolds, access scaffolding, scaffold hire]
+  - term: temporary works
+    synonyms: [temp works, temporary structures, falsework, shoring, propping]
+  - term: scaffold design
+    synonyms: [scaffold drafting, scaffold engineering, access design, scaffold drawings]
+  - term: edge protection
+    synonyms: [guardrail systems, roof edge protection, height safety barriers]
+  - term: ringlock
+    synonyms: [ring lock, rosette scaffold, modular ring scaffold, allround]
+  - term: kwikstage
+    synonyms: [quickstage, kwik stage, quick stage]
+  - term: cuplock
+    synonyms: [cup lock, cup-lok, cuplok]
+  - term: tube and fitting
+    synonyms: [tube and clamp, tube & coupler, traditional scaffold]
+  - term: mast climber
+    synonyms: [mast climbing work platform, MCWP]
+  - term: swing stage
+    synonyms: [suspended scaffold, suspended access, swinging stage]
+  - term: rope access
+    synonyms: [industrial rope access, abseiling services, IRATA]
+  - term: shutdown
+    synonyms: [turnaround, outage, maintenance shutdown, STO]
+  - term: TWC
+    synonyms: [temporary works coordinator, temporary works supervisor]
+  - term: leg load
+    synonyms: [leg loading, standard load, bay load calculation]
+exclusions:
+  - scaffolding (education/learning theory)
+  - scaffolding (software/programming)
+  - scaffold (biology/tissue engineering)
+  - staging (theatre/events software)
+  - shoring (finance)

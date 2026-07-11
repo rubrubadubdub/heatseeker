@@ -1,0 +1,61 @@
+# Service taxonomy (spec §8.4). Categories group the ~35 seed services.
+schema: service_taxonomy/v1
+categories:
+  - id: design_engineering
+    name: Design & engineering
+    services:
+      - {id: drafting_2d, name: 2D drafting}
+      - {id: modelling_3d, name: 3D modelling}
+      - {id: scaffold_design, name: Scaffold design}
+      - {id: temporary_works_design, name: Temporary-works design}
+      - {id: engineering_calculation, name: Engineering calculation}
+      - {id: leg_load_calculation, name: Leg-load calculation}
+      - {id: design_verification, name: Design verification}
+      - {id: independent_checking, name: Independent checking}
+      - {id: access_engineering, name: Access engineering}
+  - id: documentation
+    name: Documentation & quantities
+    services:
+      - {id: quantity_take_off, name: Quantity take-off}
+      - {id: bill_of_materials, name: Bill of materials}
+      - {id: gear_list, name: Gear list}
+      - {id: tender_drawing, name: Tender drawing}
+      - {id: construction_issue_drawing, name: Construction issue drawing}
+      - {id: as_built_documentation, name: As-built documentation}
+  - id: digital_integration
+    name: Digital & BIM
+    services:
+      - {id: site_integration, name: Site integration}
+      - {id: bim_coordination, name: BIM coordination}
+      - {id: point_cloud_integration, name: Point-cloud integration}
+      - {id: visualisation, name: Visualisation}
+  - id: commercial_support
+    name: Commercial & project support
+    services:
+      - {id: methodology_support, name: Methodology support}
+      - {id: estimation, name: Estimation}
+      - {id: project_management, name: Project management}
+  - id: field_operations
+    name: Field operations
+    services:
+      - {id: erection, name: Erection}
+      - {id: dismantling, name: Dismantling}
+      - {id: inspection, name: Inspection}
+  - id: supply_logistics
+    name: Supply, hire & logistics
+    services:
+      - {id: hire, name: Hire}
+      - {id: sales, name: Sales}
+      - {id: transport, name: Transport}
+      - {id: labour_supply, name: Labour supply}
+  - id: specialist_protection
+    name: Specialist & protection
+    services:
+      - {id: encapsulation, name: Encapsulation}
+      - {id: weather_protection, name: Weather protection}
+      - {id: edge_protection, name: Edge protection}
+      - {id: special_structures, name: Special structures}
+  - id: training_certification
+    name: Training & certification
+    services:
+      - {id: training, name: Training}

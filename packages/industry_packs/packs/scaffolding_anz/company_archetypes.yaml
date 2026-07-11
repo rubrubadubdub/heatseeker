@@ -1,0 +1,47 @@
+# Organisation archetypes (spec §8.4). Seeds, not hard-coded restrictions.
+schema: company_archetypes/v1
+archetypes:
+  - {id: scaffold_contractor, name: Scaffold contractor}
+  - {id: industrial_scaffold_contractor, name: Industrial scaffold contractor}
+  - {id: commercial_scaffold_contractor, name: Commercial scaffold contractor}
+  - {id: residential_scaffold_contractor, name: Residential scaffold contractor}
+  - {id: infrastructure_scaffold_contractor, name: Infrastructure scaffold contractor}
+  - {id: labour_only_scaffold_provider, name: Labour-only scaffold provider}
+  - {id: scaffold_hire_company, name: Scaffold hire / rental company}
+  - {id: scaffold_sales_company, name: Scaffold sales company}
+  - {id: scaffold_manufacturer, name: Scaffold manufacturer}
+  - {id: scaffold_importer, name: Scaffold importer}
+  - {id: scaffold_distributor, name: Scaffold distributor}
+  - {id: scaffold_system_owner, name: Scaffold system owner}
+  - {id: access_contractor, name: Access contractor}
+  - {id: rope_access_provider, name: Rope-access provider}
+  - {id: mast_climber_provider, name: Mast-climber provider}
+  - {id: mobile_access_provider, name: Mobile-access provider}
+  - {id: formwork_contractor, name: Formwork contractor}
+  - {id: falsework_contractor, name: Falsework contractor}
+  - {id: shoring_contractor, name: Shoring contractor}
+  - {id: temporary_works_designer, name: Temporary-works designer}
+  - {id: temporary_works_coordinator_service, name: Temporary-works coordinator service}
+  - {id: structural_engineering_consultancy, name: Structural engineering consultancy}
+  - {id: scaffold_design_consultancy, name: Scaffold design consultancy}
+  - {id: drafting_cad_outsourcing_provider, name: Drafting / CAD outsourcing provider}
+  - {id: gc_with_internal_scaffold, name: General contractor with internal scaffold capability}
+  - {id: industrial_maintenance_contractor, name: Industrial-maintenance contractor}
+  - {id: shutdown_turnaround_contractor, name: Shutdown / turnaround contractor}
+  - {id: mining_services_contractor, name: Mining-services contractor}
+  - {id: marine_offshore_access_provider, name: Marine / offshore access provider}
+  - {id: event_staging_provider, name: Event / staging structure provider}
+  - {id: heritage_access_specialist, name: Heritage-access specialist}
+  - {id: encapsulation_containment_provider, name: Encapsulation / containment provider}
+  - {id: roofing_access_provider, name: Roofing-access provider}
+  - {id: safety_edge_protection_provider, name: Safety and edge-protection provider}
+  - {id: training_provider, name: Training provider}
+  - {id: inspection_provider, name: Inspection provider}
+  - {id: certification_provider, name: Certification provider}
+  - {id: equipment_software_provider, name: Equipment-management software provider}
+  - {id: logistics_yard_provider, name: Logistics / yard-management provider}
+  - {id: labour_hire_business, name: Labour-hire business}
+  - {id: principal_contractor, name: Principal contractor}
+  - {id: asset_owner, name: Asset owner}
+  - {id: procurement_intermediary, name: Procurement intermediary}
+  - {id: industry_association, name: Industry association}

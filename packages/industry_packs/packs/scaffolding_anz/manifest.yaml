@@ -1,0 +1,10 @@
+schema: pack_manifest/v1
+id: scaffolding_anz
+name: Scaffolding, Access & Temporary Works (AU/NZ)
+version: 0.1.0
+description: >-
+  First industry pack (spec §8.4): scaffolding, access, temporary works and adjacent
+  construction services, focused on Australia and New Zealand. Seeds archetypes,
+  service taxonomy, segments, systems, vocabulary, and research sources. Entries are
+  seeds, not restrictions — extend freely; the loader validates structure.
+spec_compat: phase1/v1

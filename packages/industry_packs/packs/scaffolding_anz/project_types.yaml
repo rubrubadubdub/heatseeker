@@ -1,0 +1,13 @@
+# Project profile axis (spec §15.1).
+schema: project_types/v1
+project_types:
+  - {id: small_recurring, name: Small recurring}
+  - {id: mid_market, name: Mid-market}
+  - {id: major_project, name: Major project}
+  - {id: shutdown_turnaround, name: Shutdown / turnaround}
+  - {id: maintenance, name: Maintenance}
+  - {id: bespoke_engineered, name: Bespoke engineered}
+  - {id: high_risk, name: High-risk}
+  - {id: remote, name: Remote}
+  - {id: urban, name: Urban}
+  - {id: framework_contract, name: Framework contract}
