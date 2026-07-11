@@ -112,6 +112,7 @@ improve workflows.
 | RSS/Atom per-entry parsing (feeds stored as one XML doc today) | News/story clustering needs per-article documents | M7 (or earlier) |
 | PDF pipeline (spec §12.3) | Capability statements/tenders are PDFs | M5 |
 | Autopilot-scheduled crawls (crawls are on-demand) | Needs a cadence policy to avoid 21 sites × every tick | short follow-up |
+| Publication-date extraction (`claimed_published_at` exists but no collector populates it) | Freshness weighting (§17.4) needs the content's own date, not just our fetch date — a 1979 guideline fetched today looks "fresh" without it | M4/M5 (extract from meta/JSON-LD/RSS at distillation) |
 | JS rendering (Playwright, permitted-only) | JS-only sites yield little today | when a real source needs it |
 | AI pass-2 source vetting + terms interpretation | Funnel pass 2 | M11 |
 
