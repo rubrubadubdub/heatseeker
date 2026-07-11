@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from heatseeker_common.db import create_db_engine
 from heatseeker_common.health import check_health
 from heatseeker_common.settings import Settings, get_settings
+from heatseeker_source_registry.regions import load_regions_if_available
 
 from heatseeker_api import api_routes, ui_routes, ui_sources
 
@@ -24,6 +25,7 @@ _HERE = Path(__file__).parent
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     engine = create_db_engine(settings)
+    load_regions_if_available(engine)  # named regions are data (ADR-0012)
 
     app = FastAPI(title="Heatseeker", version="0.1.0", docs_url="/docs")
     app.state.settings = settings

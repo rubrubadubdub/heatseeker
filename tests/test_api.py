@@ -60,5 +60,36 @@ def test_openapi_exposes_source_targeting_contracts(engine, settings):
         "/api/source-coverages",
         "/api/source-coverages/summary",
         "/api/scopes",
+        "/api/regions",
     ):
         assert path in paths
+
+
+def test_regions_api_crud_and_scope_exclusions(engine, settings):
+    client = TestClient(create_app(settings))
+
+    codes = {region["code"] for region in client.get("/api/regions").json()}
+    assert {"ANZ", "APAC", "LATAM", "MIDDLE_EAST", "AFRICA"} <= codes  # builtins seeded
+
+    created = client.put(
+        "/api/regions",
+        json={"code": "GULF", "name": "Gulf states", "member_codes": ["AE", "SA", "QA"]},
+    )
+    assert created.status_code == 200
+    assert created.json()["is_builtin"] is False
+
+    scope = client.post(
+        "/api/scopes",
+        json={"name": "APAC ex CN", "geo_codes": ["APAC"], "exclude_codes": ["CN"]},
+    )
+    assert scope.status_code == 201
+    assert scope.json()["exclude_codes"] == ["CN"]
+
+    nested = client.put(
+        "/api/regions", json={"code": "NESTED", "name": "n", "member_codes": ["APAC"]}
+    )
+    assert nested.status_code == 400  # regions may not nest
+
+    assert client.delete("/api/regions/APAC").status_code == 409  # builtin
+    assert client.delete("/api/regions/GULF").status_code == 204
+    assert client.delete("/api/regions/GULF").status_code == 404  # already gone

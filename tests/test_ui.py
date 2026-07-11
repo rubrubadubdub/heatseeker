@@ -52,6 +52,43 @@ def test_scope_create_and_activate_via_ui(client):
     assert "AU-QLD" in page
 
 
+def test_scope_create_with_exclusions_via_ui(client):
+    response = client.post(
+        "/scopes/create",
+        data={"name": "APAC ex China", "codes": "APAC", "exclude": "CN"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    page = client.get("/scopes").text
+    assert "APAC ex China" in page
+    assert "not CN" in page  # exclusion badge
+
+
+def test_region_editor_round_trip(client):
+    page = client.get("/scopes").text
+    assert "Named regions" in page
+    assert "LATAM" in page  # builtins seeded and listed
+
+    response = client.post(
+        "/scopes/regions/save",
+        data={"code": "GULF", "name": "Gulf states", "members": "AE, SA, QA"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "GULF" in client.get("/scopes").text
+
+    # A custom region is immediately usable in a scope…
+    client.post(
+        "/scopes/create", data={"name": "Gulf scope", "codes": "GULF"}, follow_redirects=False
+    )
+    # …and deletion is refused while referenced, as is deleting builtins.
+    client.post("/scopes/regions/GULF/delete", follow_redirects=False)
+    client.post("/scopes/regions/APAC/delete", follow_redirects=False)
+    page = client.get("/scopes").text
+    assert "GULF" in page
+    assert "APAC" in page
+
+
 def test_dashboard_shows_pack_and_health(client):
     html = client.get("/").text
     assert "scaffolding_anz" in html

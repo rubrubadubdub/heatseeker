@@ -4,8 +4,11 @@
 <h1 class="h3 mb-2">Research scope</h1>
 <p class="small text-secondary">Tunable industry, geography, and research-purpose targeting. The <strong>active</strong>
 scope filters sources now, and will drive discovery, leads, and market outputs in later
-milestones. Codes are hierarchical: a national source (AU) still covers a state scope
-(AU-QLD), and state sources count toward a national scope.</p>
+milestones. The scopes below are just saved presets — <strong>a scope can combine anything</strong>:
+named regions, countries, states, and cities together (e.g. <code>ANZ, NORTH_AMERICA, AU-VIC-MELBOURNE</code>),
+plus exclusions to carve areas out (e.g. all of <code>APAC</code> except <code>CN</code>).
+Codes are hierarchical: a national source (AU) still covers a state scope (AU-QLD), and
+state sources count toward a national scope.</p>
 
 <div class="row g-4">
   <div class="col-lg-7">
@@ -22,6 +25,9 @@ milestones. Codes are hierarchical: a national source (AU) still covers a state 
           <td>
             {% for code in scope.geo_codes %}
               <span class="badge text-bg-secondary" title="{{ describe(code) }}">{{ code }}</span>
+            {% endfor %}
+            {% for code in scope.exclude_codes %}
+              <span class="badge text-bg-danger" title="excluded: {{ describe(code) }}">not {{ code }}</span>
             {% endfor %}
             {% for industry in scope.industry_ids %}
               <span class="badge text-bg-info">industry:{{ industry }}</span>
@@ -50,9 +56,11 @@ milestones. Codes are hierarchical: a national source (AU) still covers a state 
       <div class="card-header">New scope</div>
       <div class="card-body">
         <form method="post" action="/scopes/create" class="vstack gap-2">
-          <input name="name" class="form-control form-control-sm" placeholder="Name (e.g. QLD + WA + Melbourne)" required>
+          <input name="name" class="form-control form-control-sm" placeholder="Name (e.g. ANZ + North America)" required>
           <input name="codes" class="form-control form-control-sm mono"
-                 placeholder="Regions: AU-QLD, US-WA, AU-VIC-MELBOURNE">
+                 placeholder="Regions: ANZ, NORTH_AMERICA, AU-VIC-MELBOURNE">
+          <input name="exclude" class="form-control form-control-sm mono"
+                 placeholder="Exclude (optional): CN, US-CA">
           <input name="industries" class="form-control form-control-sm mono"
                  list="industry-choices" placeholder="Industries: scaffolding_anz">
           <datalist id="industry-choices">{% for industry in industry_choices %}<option value="{{ industry }}">{% endfor %}</datalist>
@@ -66,10 +74,63 @@ milestones. Codes are hierarchical: a national source (AU) still covers a state 
           <button class="btn btn-sm btn-primary">Create scope</button>
         </form>
         <div class="form-text mt-2">
-          Macro regions: GLOBAL, ANZ, APAC, NORTH_AMERICA, EUROPE ·
-          Countries: ISO codes (AU, NZ, US, GB…) ·
-          States: AU-QLD, US-WA… · Cities: AU-VIC-MELBOURNE, AU-QLD-BRISBANE…
+          Mix freely: named regions ({% for region in regions %}{{ region.code }}{% if not loop.last %}, {% endif %}{% endfor %})
+          · GLOBAL (everything) · countries (AU, NZ, US, GB…) · states (AU-QLD, US-WA…)
+          · cities (AU-VIC-MELBOURNE…). Exclusions drop sources operating <em>only</em>
+          inside the excluded area; broader sources are kept.
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mt-1">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">Named regions
+        <span class="small text-secondary">— regions are data, not code: edit membership freely, changes apply immediately</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          {% for region in regions %}
+          <div class="col-md-6 col-xl-4">
+            <details>
+              <summary class="small">
+                <strong>{{ region.code }}</strong> — {{ region.name }}
+                <span class="text-secondary">({{ region.member_codes|length }} members)</span>
+                {% if not region.is_builtin %}<span class="badge text-bg-info">custom</span>{% endif %}
+              </summary>
+              <form method="post" action="/scopes/regions/save" class="vstack gap-1 mt-2">
+                <input type="hidden" name="code" value="{{ region.code }}">
+                <input name="name" class="form-control form-control-sm" value="{{ region.name }}">
+                <textarea name="members" class="form-control form-control-sm mono" rows="3">{{ region.member_codes|join(', ') }}</textarea>
+                <button class="btn btn-sm btn-outline-primary py-0">save</button>
+              </form>
+              {% if not region.is_builtin %}
+              <form method="post" action="/scopes/regions/{{ region.code }}/delete" class="mt-1">
+                <button class="btn btn-sm btn-outline-danger py-0">delete</button>
+              </form>
+              {% endif %}
+            </details>
+          </div>
+          {% endfor %}
+        </div>
+        <hr>
+        <form method="post" action="/scopes/regions/save" class="row g-2 align-items-start">
+          <div class="col-md-2">
+            <input name="code" class="form-control form-control-sm mono" placeholder="Code: SOUTHEAST_ASIA" required>
+          </div>
+          <div class="col-md-3">
+            <input name="name" class="form-control form-control-sm" placeholder="Name: Southeast Asia">
+          </div>
+          <div class="col-md-5">
+            <input name="members" class="form-control form-control-sm mono"
+                   placeholder="Members: SG, MY, TH, VN (countries or states — regions can't nest)" required>
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-sm btn-primary">Add region</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

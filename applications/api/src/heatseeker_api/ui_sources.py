@@ -25,6 +25,7 @@ from heatseeker_source_registry.identity import (
     url_identity,
 )
 from heatseeker_source_registry.models import (
+    GeoRegion,
     ResearchScope,
     SourceCoverage,
     SourceDefinition,
@@ -39,6 +40,7 @@ from heatseeker_source_registry.policy import (
     check_robots,
     coverage_has_distinct_endpoint,
 )
+from heatseeker_source_registry.regions import delete_region, load_regions, upsert_region
 from heatseeker_source_registry.scopes import (
     active_scope,
     create_scope,
@@ -577,6 +579,10 @@ def sources_collect(
     source_id: str,
     coverage_id: str = Form(default=""),
 ):
+    # Keep the validation/snapshot read separate from the queue write.  In SQLite
+    # WAL mode, upgrading a read transaction after another process has committed
+    # can fail with SQLITE_BUSY_SNAPSHOT; busy_timeout cannot make that stale
+    # snapshot writable.  A fresh transaction can wait normally for the writer.
     with session_scope(request.app.state.engine) as session:
         source = session.get(SourceDefinition, source_id)
         if source is None:
@@ -621,6 +627,8 @@ def sources_collect(
             "scope_id": scope.id if scope else None,
             "scope_snapshot": scope_snapshot,
         }
+
+    with session_scope(request.app.state.engine) as session:
         job = jobs.enqueue(
             session,
             "sources.collect",
@@ -913,13 +921,16 @@ def evidence_detail(request: Request, document_id: str):
 def scopes_page(request: Request):
     with session_scope(request.app.state.engine) as session:
         ensure_default_scopes(session)
+        load_regions(session)  # seeds builtin regions and refreshes the registry
         scopes = list(session.scalars(select(ResearchScope).order_by(ResearchScope.name)))
+        regions = list(session.scalars(select(GeoRegion).order_by(GeoRegion.code)))
         session.expunge_all()
     return _render(
         request,
         "scopes.html",
         active="scopes",
         scopes=scopes,
+        regions=regions,
         known_codes=KNOWN_CODES,
         describe=describe,
         industry_choices=[path.name for path in discover_packs()],
@@ -931,6 +942,7 @@ def scopes_create(
     request: Request,
     name: str = Form(...),
     codes: str = Form(default=""),
+    exclude: str = Form(default=""),
     industries: str = Form(default=""),
     target_filters: str = Form(default=""),
     include_unknown: bool = Form(default=False),
@@ -960,6 +972,7 @@ def scopes_create(
                 industry_ids_raw=industries,
                 target_filters=filters,
                 include_unknown=include_unknown,
+                exclude_raw=exclude,
             )
         except ValueError as exc:
             return _redirect("/scopes", str(exc), "danger")
@@ -975,3 +988,30 @@ def scopes_activate(request: Request, scope_id: str):
             return _redirect("/scopes", "Scope not found", "danger")
         name, codes = scope.name, ", ".join(scope.geo_codes)
     return _redirect("/scopes", f"Active scope: {name} ({codes})")
+
+
+@router.post("/scopes/regions/save")
+def scopes_region_save(
+    request: Request,
+    code: str = Form(...),
+    name: str = Form(default=""),
+    members: str = Form(default=""),
+):
+    member_codes = [m for m in members.replace(";", ",").split(",") if m.strip()]
+    with session_scope(request.app.state.engine) as session:
+        try:
+            region = upsert_region(session, code, name, member_codes, actor="ui")
+        except ValueError as exc:
+            return _redirect("/scopes", str(exc), "danger")
+        saved = f"{region.code} ({len(region.member_codes)} members)"
+    return _redirect("/scopes", f"Saved region {saved}")
+
+
+@router.post("/scopes/regions/{code}/delete")
+def scopes_region_delete(request: Request, code: str):
+    with session_scope(request.app.state.engine) as session:
+        try:
+            delete_region(session, code, actor="ui")
+        except ValueError as exc:
+            return _redirect("/scopes", str(exc), "danger")
+    return _redirect("/scopes", f"Deleted region {code.upper()}")

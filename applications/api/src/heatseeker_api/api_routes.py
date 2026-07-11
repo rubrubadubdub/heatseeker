@@ -338,6 +338,7 @@ class ScopeCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=20_000)
     geo_codes: list[str] = Field(default_factory=list)
+    exclude_codes: list[str] = Field(default_factory=list)
     industry_ids: list[str] = Field(default_factory=list)
     target_filters: dict = Field(default_factory=dict)
     include_unknown: bool = True
@@ -349,6 +350,16 @@ class ScopeCreateRequest(BaseModel):
         if not value:
             raise ValueError("scope name must not be blank")
         return value
+
+
+class RegionUpsertRequest(BaseModel):
+    """Create or redefine a named geography region (regions are data, ADR-0012)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=3, max_length=50)
+    name: str = Field(default="", max_length=200)
+    member_codes: list[str] = Field(min_length=1)
 
 
 def _source_models():
@@ -1385,6 +1396,7 @@ def _scope_to_dict(scope: ResearchScope) -> dict:
         "name": scope.name,
         "description": scope.description,
         "geo_codes": scope.geo_codes,
+        "exclude_codes": scope.exclude_codes,
         "industry_ids": scope.industry_ids,
         "target_filters": scope.target_filters,
         "include_unknown": scope.include_unknown,
@@ -1430,6 +1442,7 @@ def api_create_scope(request: Request, payload: ScopeCreateRequest) -> dict:
                 industry_ids_raw=",".join(payload.industry_ids),
                 target_filters=payload.target_filters,
                 include_unknown=payload.include_unknown,
+                exclude_raw=",".join(payload.exclude_codes),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1443,6 +1456,55 @@ def api_activate_scope(request: Request, scope_id: str) -> dict:
         if scope is None:
             raise HTTPException(status_code=404, detail="scope not found")
         return _scope_to_dict(scope)
+
+
+def _region_to_dict(region) -> dict:
+    return {
+        "code": region.code,
+        "name": region.name,
+        "member_codes": region.member_codes,
+        "is_builtin": region.is_builtin,
+        "updated_at": region.updated_at.isoformat(),
+    }
+
+
+@router.get("/regions")
+def api_list_regions(request: Request) -> list[dict]:
+    from heatseeker_source_registry.models import GeoRegion
+    from heatseeker_source_registry.regions import load_regions
+
+    with session_scope(request.app.state.engine) as session:
+        load_regions(session)  # seeds builtins on first call
+        return [
+            _region_to_dict(region)
+            for region in session.scalars(select(GeoRegion).order_by(GeoRegion.code))
+        ]
+
+
+@router.put("/regions", status_code=200)
+def api_upsert_region(request: Request, payload: RegionUpsertRequest) -> dict:
+    from heatseeker_source_registry.regions import upsert_region
+
+    with session_scope(request.app.state.engine) as session:
+        try:
+            region = upsert_region(
+                session, payload.code, payload.name, payload.member_codes, actor="api"
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _region_to_dict(region)
+
+
+@router.delete("/regions/{code}", status_code=204)
+def api_delete_region(request: Request, code: str) -> None:
+    from heatseeker_source_registry.regions import delete_region
+
+    with session_scope(request.app.state.engine) as session:
+        try:
+            delete_region(session, code, actor="api")
+        except ValueError as exc:
+            status = 404 if "no region named" in str(exc) else 409
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
 
 
 @router.get("/documents")
