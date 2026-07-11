@@ -54,6 +54,7 @@ def _make_source(session, pack_id=None, access_method="html") -> str:
 
 
 def test_disallowed_paths_are_never_fetched(engine, settings):
+    settings.robots_policy = "enforce"
     transport, requested = _site(
         {
             "/": '<a href="/public">ok</a> <a href="/private/secret">no</a>',
@@ -236,6 +237,7 @@ def test_diminishing_returns_stops_stale_crawl(engine, settings):
 
 
 def test_unreachable_robots_is_conservative(engine, settings):
+    settings.robots_policy = "enforce"
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
             return httpx.Response(500)
@@ -252,3 +254,23 @@ def test_unreachable_robots_is_conservative(engine, settings):
         )
         assert summary["pages_fetched"] == 0  # restricted when robots can't be read
         assert summary["blocked"] >= 1
+
+
+def test_ignore_mode_treats_robots_as_advisory(engine, settings):
+    transport, requested = _site(
+        {"/": '<a href="/private/secret">private</a>', "/private/secret": "<p>evidence</p>"},
+        robots="User-agent: *\nDisallow: /private/\n",
+    )
+    with session_scope(engine) as session:
+        source_id = _make_source(session)
+        summary = crawl_source(
+            session,
+            settings,
+            source_id,
+            transport=transport,
+            sleeper=lambda _seconds: None,
+        )
+        assert summary["blocked"] == 0
+        assert summary["pages_fetched"] == 2
+    assert "/private/secret" in requested
+    assert "/robots.txt" not in requested

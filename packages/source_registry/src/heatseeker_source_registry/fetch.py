@@ -25,6 +25,18 @@ class FetchTooLargeError(Exception):
     pass
 
 
+def http_client_kwargs(
+    settings: Settings, transport: httpx.BaseTransport | None
+) -> dict:
+    """httpx.Client kwargs for egress: an injected test transport wins; otherwise route
+    through the configured proxy when set (basic VPN/region seam, ADR-0013)."""
+    if transport is not None:
+        return {"transport": transport}
+    if settings.fetch_proxy_url:
+        return {"proxy": settings.fetch_proxy_url}
+    return {}
+
+
 def fetch_url(
     settings: Settings,
     url: str,
@@ -48,7 +60,7 @@ def fetch_url(
             timeout=settings.fetch_timeout_seconds,
             follow_redirects=True,
             headers=headers,
-            transport=transport,
+            **http_client_kwargs(settings, transport),
         ) as client,
         client.stream("GET", url) as response,
     ):

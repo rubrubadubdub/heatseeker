@@ -8,6 +8,7 @@ from heatseeker_core_domain.geography import excluded_by, in_scope, parse_jurisd
 from heatseeker_industry_packs.loader import default_packs_root, load_pack
 from heatseeker_source_registry import rawstore
 from heatseeker_source_registry.collect import collect_source
+from heatseeker_source_registry.fetch import http_client_kwargs
 from heatseeker_source_registry.models import (
     RobotsStatus,
     SourceDefinition,
@@ -49,6 +50,13 @@ def _make_source(session, **overrides) -> str:
 
 def _transport(handler) -> httpx.MockTransport:
     return httpx.MockTransport(handler)
+
+
+def test_proxy_helper_routes_real_fetches_but_test_transport_wins(settings):
+    settings.fetch_proxy_url = "http://proxy.example:8080"
+    assert http_client_kwargs(settings, None) == {"proxy": "http://proxy.example:8080"}
+    transport = _transport(lambda _request: httpx.Response(200))
+    assert http_client_kwargs(settings, transport) == {"transport": transport}
 
 
 # --- Seed sync ---------------------------------------------------------------
@@ -128,11 +136,35 @@ def test_check_robots_missing_file_means_allowed(engine, settings):
 def test_collect_blocked_when_policy_regresses(engine, settings):
     """Even an ACTIVE source is re-gated at collection time."""
     with session_scope(engine) as session:
-        source_id = _make_source(session, robots_status=RobotsStatus.DISALLOWED)
+        source_id = _make_source(
+            session,
+            robots_status=RobotsStatus.DISALLOWED,
+            respect_robots_override=True,
+        )
     with session_scope(engine) as session:
         result = collect_source(session, settings, source_id)
         assert result["outcome"] == "blocked"
         assert "robots" in result["error"]
+
+
+def test_collect_ignore_mode_is_auditable(engine, settings):
+    body = b"<html><body>public evidence</body></html>"
+    transport = _transport(
+        lambda _request: httpx.Response(
+            200,
+            content=body,
+            headers={"Content-Type": "text/html"},
+        )
+    )
+    with session_scope(engine) as session:
+        source_id = _make_source(session, robots_status=RobotsStatus.DISALLOWED)
+    with session_scope(engine) as session:
+        result = collect_source(session, settings, source_id, transport=transport)
+        assert result["outcome"] == "collected"
+        document = session.get(SourceDocument, result["document_id"])
+        assert document.access_policy_snapshot["robots_status"] == RobotsStatus.DISALLOWED
+        assert document.access_policy_snapshot["robots_enforced"] is False
+        assert document.access_policy_snapshot["robots_override_applied"] is True
 
 
 # --- Evidence preservation and dedupe -------------------------------------------

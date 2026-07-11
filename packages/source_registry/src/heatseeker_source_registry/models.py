@@ -87,6 +87,9 @@ class SourceDefinition(Base):
     )
     robots_status: Mapped[str] = mapped_column(String(20), default=RobotsStatus.UNKNOWN)
     robots_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    # Per-source robots override (ADR-0013): NULL = follow settings.robots_policy;
+    # True = always honour robots here; False = always ignore robots here.
+    respect_robots_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     terms_status: Mapped[str] = mapped_column(String(20), default=TermsStatus.UNREVIEWED)
     authentication_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     rate_limit_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)

@@ -2,9 +2,10 @@
 
 Each tick: bootstrap seeds from packs -> check unchecked robots policies (bounded batch)
 -> auto-activate cleared candidates -> collect due sources -> periodic maintenance
-(grading, auto-deprecation, robots re-checks). Deterministic gates still apply: nothing
-prohibited or robots-disallowed ever activates, and proposal-origin sources still wait
-for review (source-discovery.md funnel). Humans can intervene anytime; they don't have to.
+(grading, auto-deprecation, robots re-checks). Deterministic gates still apply: terms-
+prohibited sources never activate; robots-disallowed sources activate only when the
+auditable global/per-source policy says robots is advisory. Proposal-origin sources still
+wait for review (source-discovery.md funnel). Humans can intervene anytime.
 """
 
 from datetime import timedelta
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from heatseeker_source_registry.grading import evaluate_all
 from heatseeker_source_registry.models import RobotsStatus, SourceDefinition, SourceLifecycle
-from heatseeker_source_registry.policy import activation_blockers, check_robots
+from heatseeker_source_registry.policy import activation_blockers, check_robots, robots_enforced
 from heatseeker_source_registry.regions import load_regions
 from heatseeker_source_registry.schedule import collect_due
 from heatseeker_source_registry.sync import sync_pack_seeds
@@ -66,7 +67,7 @@ def _check_policies(
     return len(pending)
 
 
-def _auto_activate(session: Session) -> list[str]:
+def _auto_activate(session: Session, settings: Settings) -> list[str]:
     activated = []
     candidates = session.scalars(
         select(SourceDefinition).where(
@@ -75,7 +76,9 @@ def _auto_activate(session: Session) -> list[str]:
         )
     ).all()
     for source in candidates:
-        if not activation_blockers(source):
+        if not activation_blockers(
+            source, enforce_robots=robots_enforced(source, settings)
+        ):
             source.lifecycle_status = SourceLifecycle.ACTIVE
             source.updated_at = utc_now()
             audit.record(
@@ -107,7 +110,7 @@ def autopilot_tick(
     load_regions(session)
     summary: dict = {"seeded": _bootstrap_seeds(session)}
     summary["policies_checked"] = _check_policies(session, settings, transport)
-    summary["activated"] = _auto_activate(session)
+    summary["activated"] = _auto_activate(session, settings)
     summary["collection"] = collect_due(session, settings, transport=transport)
 
     if _maintenance_due(session, settings):

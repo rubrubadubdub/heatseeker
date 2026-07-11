@@ -35,8 +35,10 @@
     <a href="/sources?scope_only=1">show in-scope only</a>
   {% endif %}
 </p>
-<p class="small text-secondary">Collection requires: robots allowed (or N/A) + terms not
-prohibited + source activated. Every action is audited.</p>
+<p class="small text-secondary">Collection requires terms not prohibited + source activated.
+Robots policy is globally <strong>{{ robots_policy }}</strong>; a per-source override may
+change enforcement. Robots decisions and overrides remain visible in evidence provenance.
+Every action is audited.</p>
 
 <form method="get" action="/sources" class="card card-body py-2 mb-3">
   <div class="row g-2 align-items-end">
@@ -149,7 +151,10 @@ prohibited + source activated. Every action is audited.</p>
           {% endif %}
         </td>
         <td><span class="badge text-bg-{{ lifecycle_badges.get(s.lifecycle_status, 'secondary') }}">{{ s.lifecycle_status }}</span></td>
-        <td><span class="badge text-bg-{{ policy_badges.get(s.robots_status, 'secondary') }}">{{ s.robots_status }}</span></td>
+        <td><span class="badge text-bg-{{ policy_badges.get(s.robots_status, 'secondary') }}">{{ s.robots_status }}</span>
+          {% if s.respect_robots_override is sameas true %}<div class="small">forced enforce</div>
+          {% elif s.respect_robots_override is sameas false %}<div class="small">forced ignore</div>{% endif %}
+        </td>
         <td>
           <form method="post" action="/sources/{{ s.id }}/terms" class="d-inline">
             <select name="terms_status" class="form-select form-select-sm d-inline w-auto badge-select"

@@ -60,8 +60,9 @@ route in `ui_routes.py`; UI calls Python functions directly, never its own HTTP 
 - **Missing ≠ false**: absence of evidence must not become evidence of absence. Abstain
   rather than fabricate.
 - **Provenance everywhere**: every fact carries source, observed date, confidence, freshness.
-- **Responsible collection only**: robots.txt respected, no auth/paywall/CAPTCHA bypass,
-  per-domain politeness, clear crawler identity.
+- **Responsible collection only**: robots.txt is always inspected and recorded; its
+  enforcement follows ADR-0013's global/per-source policy. Never bypass auth, paywalls,
+  or CAPTCHAs; always retain per-domain politeness, budgets, and clear crawler identity.
 - **Industry-agnostic core**: scaffolding knowledge lives in the industry pack, never in
   core tables. A second test pack must load without architectural rework.
 - **AI-in-the-loop by default, bounded** (ADR-0008): replaceable providers (Anthropic

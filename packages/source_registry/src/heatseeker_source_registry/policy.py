@@ -12,6 +12,7 @@ from heatseeker_common.settings import Settings
 from heatseeker_common.timeutil import utc_now
 from protego import Protego
 
+from heatseeker_source_registry.fetch import http_client_kwargs
 from heatseeker_source_registry.identity import canonicalise_url
 from heatseeker_source_registry.models import (
     RobotsStatus,
@@ -19,6 +20,17 @@ from heatseeker_source_registry.models import (
     SourceDefinition,
     TermsStatus,
 )
+
+
+def robots_enforced(source: SourceDefinition, settings: Settings) -> bool:
+    """Whether robots.txt Disallow rules gate this source (ADR-0013).
+
+    A per-source override wins; otherwise the global ``robots_policy`` decides. Robots
+    status is still fetched and recorded for provenance even when not enforced.
+    """
+    if source.respect_robots_override is not None:
+        return source.respect_robots_override
+    return settings.robots_policy == "enforce"
 
 
 def _source_policy_url(source: SourceDefinition) -> str | None:
@@ -65,7 +77,7 @@ def _check_url_robots(
             timeout=settings.fetch_timeout_seconds,
             follow_redirects=True,
             headers={"User-Agent": settings.crawler_user_agent},
-            transport=transport,
+            **http_client_kwargs(settings, transport),
         ) as client:
             response = client.get(robots_url)
         if response.status_code >= 500:
@@ -118,13 +130,21 @@ def check_coverage_robots(
 
 
 def activation_blockers(
-    source: SourceDefinition, coverage: SourceCoverage | None = None
+    source: SourceDefinition,
+    coverage: SourceCoverage | None = None,
+    *,
+    enforce_robots: bool = True,
 ) -> list[str]:
-    """Deterministic activation gate. Empty list = activatable."""
+    """Deterministic activation gate. Empty list = activatable.
+
+    ``enforce_robots`` (compute via :func:`robots_enforced`) controls whether robots.txt
+    gates collection. When False (ADR-0013 owner policy), robots never blocks — but terms
+    prohibition remains a separate human decision that is always honoured.
+    """
     blockers: list[str] = []
     if source.terms_status == TermsStatus.PROHIBITED:
         blockers.append("terms prohibit automated access (spec §11.4)")
-    if source.access_method != "manual":
+    if enforce_robots and source.access_method != "manual":
         robots_status = (
             coverage.robots_status
             if coverage_has_distinct_endpoint(source, coverage)
@@ -147,13 +167,24 @@ def policy_snapshot(
     *,
     coverage: SourceCoverage | None = None,
     collection_url: str | None = None,
+    enforce_robots: bool = True,
 ) -> dict:
-    """Recorded with every retrieval so evidence carries the policy it was taken under."""
+    """Recorded with every retrieval so evidence carries the policy it was taken under.
+
+    ``robots_enforced`` / ``robots_override_applied`` make an ADR-0013 override auditable:
+    the raw robots status is preserved, alongside the fact that collection proceeded in
+    spite of it.
+    """
+    effective_robots = (
+        coverage.robots_status
+        if coverage_has_distinct_endpoint(source, coverage)
+        else source.robots_status
+    )
     return {
-        "robots_status": (
-            coverage.robots_status
-            if coverage_has_distinct_endpoint(source, coverage)
-            else source.robots_status
+        "robots_status": effective_robots,
+        "robots_enforced": enforce_robots,
+        "robots_override_applied": (
+            not enforce_robots and effective_robots == RobotsStatus.DISALLOWED
         ),
         "robots_checked_at": (
             coverage.robots_checked_at.isoformat()

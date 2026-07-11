@@ -23,7 +23,11 @@ from heatseeker_source_registry.models import (
     SourceDocument,
     SourceLifecycle,
 )
-from heatseeker_source_registry.policy import activation_blockers, policy_snapshot
+from heatseeker_source_registry.policy import (
+    activation_blockers,
+    policy_snapshot,
+    robots_enforced,
+)
 from heatseeker_source_registry.rawstore import store_bytes
 from heatseeker_source_registry.targeting import match_coverage, serialize_coverage
 
@@ -176,7 +180,8 @@ def collect_source(
             "outcome": "skipped",
             "error": f"source is {source.lifecycle_status}, not collectable",
         }
-    blockers = activation_blockers(source, coverage)
+    enforce_robots = robots_enforced(source, settings)
+    blockers = activation_blockers(source, coverage, enforce_robots=enforce_robots)
     if blockers:  # policy may have changed since activation — re-gate every collection
         return {"outcome": "blocked", "error": "; ".join(blockers)}
     url = collection_url(source, coverage)
@@ -274,7 +279,12 @@ def collect_source(
         http_status=result.status_code,
         etag=result.etag,
         last_modified=result.last_modified,
-        access_policy_snapshot=policy_snapshot(source, coverage=coverage, collection_url=url),
+        access_policy_snapshot=policy_snapshot(
+            source,
+            coverage=coverage,
+            collection_url=url,
+            enforce_robots=enforce_robots,
+        ),
         targeting_snapshot=_targeting_snapshot(coverage, scope_snapshot),
         collector_version=COLLECTOR_VERSION,
     )

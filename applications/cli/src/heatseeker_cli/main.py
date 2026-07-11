@@ -688,7 +688,7 @@ def sources_collect(
         SourceCoverage,
         SourceDefinition,
     )
-    from heatseeker_source_registry.policy import activation_blockers
+    from heatseeker_source_registry.policy import activation_blockers, robots_enforced
     from heatseeker_source_registry.scopes import active_scope
     from heatseeker_source_registry.targeting import match_coverages
 
@@ -711,7 +711,11 @@ def sources_collect(
             if coverage_id and (coverage is None or coverage.source_definition_id != source_id):
                 typer.echo("source coverage not found", err=True)
                 raise typer.Exit(code=1)
-            blockers = activation_blockers(source, coverage)
+            blockers = activation_blockers(
+                source,
+                coverage,
+                enforce_robots=robots_enforced(source, settings),
+            )
             if blockers:
                 typer.secho("; ".join(blockers), fg=typer.colors.RED, err=True)
                 raise typer.Exit(code=1)
@@ -759,6 +763,47 @@ def sources_collect(
                 actor="cli",
             )
             result = {"job_id": job.id, "payload": job.payload}
+        _echo_json(result)
+    finally:
+        engine.dispose()
+
+
+@sources_app.command("activate")
+def sources_activate(source_id: str) -> None:
+    """Activate a source under the effective global/per-source robots policy."""
+    from heatseeker_common import audit
+    from heatseeker_common.timeutil import utc_now
+    from heatseeker_source_registry.models import SourceDefinition, SourceLifecycle
+    from heatseeker_source_registry.policy import activation_blockers, robots_enforced
+
+    settings = _settings()
+    engine = create_db_engine(settings)
+    try:
+        with session_scope(engine) as session:
+            source = session.get(SourceDefinition, source_id)
+            if source is None:
+                typer.echo("source not found", err=True)
+                raise typer.Exit(code=1)
+            enforce_robots = robots_enforced(source, settings)
+            blockers = activation_blockers(source, enforce_robots=enforce_robots)
+            if blockers:
+                typer.secho("; ".join(blockers), fg=typer.colors.RED, err=True)
+                raise typer.Exit(code=1)
+            source.lifecycle_status = SourceLifecycle.ACTIVE
+            source.updated_at = utc_now()
+            audit.record(
+                session,
+                "cli",
+                "source.activated",
+                "source",
+                source.id,
+                {"robots_enforced": enforce_robots},
+            )
+            result = {
+                "id": source.id,
+                "lifecycle_status": str(source.lifecycle_status),
+                "robots_enforced": enforce_robots,
+            }
         _echo_json(result)
     finally:
         engine.dispose()

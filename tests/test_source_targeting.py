@@ -476,6 +476,7 @@ def test_same_content_at_distinct_urls_remains_distinct_evidence(engine, setting
 
 
 def test_distinct_coverage_endpoint_requires_its_own_robots_check(engine, settings):
+    settings.robots_policy = "enforce"
     with session_scope(engine) as session:
         source = _source()
         session.add(source)
@@ -738,6 +739,41 @@ def test_source_and_coverage_workflow_via_ui(engine, settings):
         "/sources", params={"industry_id": "scaffolding", "region_code": "AU-QLD"}
     )
     assert "Edited policy bulletin" in filtered.text
+
+
+def test_robots_override_controls_api_activation_and_ui(engine, settings):
+    with session_scope(engine) as session:
+        source = _source(
+            name="Robots advisory source",
+            lifecycle_status=SourceLifecycle.CANDIDATE,
+            robots_status=RobotsStatus.DISALLOWED,
+        )
+        session.add(source)
+        session.flush()
+        source_id = source.id
+
+    client = TestClient(create_app(settings))
+    activated = client.post(f"/api/sources/{source_id}/activate")
+    assert activated.status_code == 200
+    assert activated.json()["lifecycle_status"] == SourceLifecycle.ACTIVE
+
+    changed = client.post(
+        f"/sources/{source_id}/robots-policy",
+        data={"robots_policy": "enforce"},
+        follow_redirects=False,
+    )
+    assert changed.status_code == 303
+    with session_scope(engine) as session:
+        source = session.get(SourceDefinition, source_id)
+        assert source.respect_robots_override is True
+        source.lifecycle_status = SourceLifecycle.CANDIDATE
+
+    blocked = client.post(f"/api/sources/{source_id}/activate")
+    assert blocked.status_code == 409
+    assert "robots" in blocked.json()["detail"]
+    detail = client.get(f"/sources/{source_id}")
+    assert "always enforce" in detail.text
+    assert "Effective mode: <strong>enforce</strong>" in detail.text
 
 
 def test_ui_collect_uses_fresh_transaction_for_enqueue(engine, settings, monkeypatch):

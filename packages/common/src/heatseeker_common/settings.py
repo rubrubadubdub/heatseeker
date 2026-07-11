@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,6 +36,17 @@ class Settings(BaseSettings):
     collect_due_batch_limit: int = 10
     robots_recheck_days: float = 7.0
     store_compression: bool = True
+    # Robots policy (ADR-0013, owner directive). "enforce" honours robots.txt Disallow;
+    # "ignore" collects regardless while KEEPING the identified user-agent, politeness
+    # delays, and conditional GETs — the sweet spot for a private, low-volume research
+    # tool that wants the data without burning exit IPs. Robots status is still fetched
+    # and recorded in evidence provenance either way. A per-source override wins over this.
+    robots_policy: str = "ignore"
+    # Optional outbound proxy for every fetch (basic VPN/region seam, ADR-0013), e.g.
+    # "http://host:8080" or "socks5://user:pass@host:1080" (SOCKS needs httpx[socks]).
+    # Ignored when a test transport is injected. Per-region auto-switching is a tracked
+    # TODO (roadmap) — today one proxy applies to all collection + crawl traffic.
+    fetch_proxy_url: str | None = None
     # Autopilot: the worker self-drives seed sync, policy checks, activation,
     # collection, and maintenance (ADR-0011). Disable to go fully manual.
     autopilot_enabled: bool = True
@@ -58,6 +70,25 @@ class Settings(BaseSettings):
         if upper not in allowed:
             raise ValueError(f"log_level must be one of {sorted(allowed)}, got {value!r}")
         return upper
+
+    @field_validator("robots_policy")
+    @classmethod
+    def _valid_robots_policy(cls, value: str) -> str:
+        lowered = value.strip().lower()
+        if lowered not in {"enforce", "ignore"}:
+            raise ValueError(f"robots_policy must be 'enforce' or 'ignore', got {value!r}")
+        return lowered
+
+    @field_validator("fetch_proxy_url")
+    @classmethod
+    def _valid_fetch_proxy_url(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        value = value.strip()
+        parts = urlsplit(value)
+        if parts.scheme not in {"http", "https", "socks5", "socks5h"} or not parts.hostname:
+            raise ValueError("fetch_proxy_url must be an absolute HTTP(S) or SOCKS5 URL")
+        return value
 
     @property
     def resolved_data_dir(self) -> Path:

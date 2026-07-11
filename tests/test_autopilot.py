@@ -41,6 +41,7 @@ def test_autopilot_full_funnel_from_empty_registry(engine, settings):
 
 
 def test_autopilot_never_activates_blocked_or_proposals(engine, settings):
+    settings.robots_policy = "enforce"
     with session_scope(engine) as session:
         session.add(
             SourceDefinition(

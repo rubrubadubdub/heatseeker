@@ -39,6 +39,7 @@ from heatseeker_source_registry.policy import (
     check_coverage_robots,
     check_robots,
     coverage_has_distinct_endpoint,
+    robots_enforced,
 )
 from heatseeker_source_registry.regions import delete_region, load_regions, upsert_region
 from heatseeker_source_registry.scopes import (
@@ -110,6 +111,7 @@ def sources_page(
     include_unknown: bool = Query(default=False),
 ):
     engine = request.app.state.engine
+    settings = request.app.state.settings
     with session_scope(engine) as session:
         ensure_default_scopes(session)
         scope = active_scope(session)
@@ -143,7 +145,10 @@ def sources_page(
                 {
                     "source": source,
                     "in_scope": in_scope_flag,
-                    "blockers": activation_blockers(source),
+                    "blockers": activation_blockers(
+                        source,
+                        enforce_robots=robots_enforced(source, settings),
+                    ),
                     "matching_count": len(match.matched_coverage_keys),
                     "coverage_count": sum(
                         bool(match_coverages([coverage])) for coverage in source.coverages
@@ -205,6 +210,7 @@ def sources_page(
         grade_badges=GRADE_BADGES,
         policy_badges=POLICY_BADGES,
         terms_choices=[t.value for t in TermsStatus],
+        robots_policy=settings.robots_policy,
     )
 
 
@@ -524,11 +530,15 @@ def sources_check_all(request: Request):
 
 @router.post("/sources/{source_id}/activate")
 def sources_activate(request: Request, source_id: str):
+    settings = request.app.state.settings
     with session_scope(request.app.state.engine) as session:
         source = session.get(SourceDefinition, source_id)
         if source is None:
             return _redirect("/sources", "Source not found", "danger")
-        blockers = activation_blockers(source)
+        blockers = activation_blockers(
+            source,
+            enforce_robots=robots_enforced(source, settings),
+        )
         if blockers:
             return _redirect("/sources", f"Cannot activate: {'; '.join(blockers)}", "warning")
         source.lifecycle_status = SourceLifecycle.ACTIVE
@@ -536,6 +546,33 @@ def sources_activate(request: Request, source_id: str):
         audit.record(session, "ui", "source.activated", "source", source.id, {"name": source.name})
         name = source.name
     return _redirect("/sources", f"Activated {name}")
+
+
+@router.post("/sources/{source_id}/robots-policy")
+def sources_set_robots_policy(
+    request: Request,
+    source_id: str,
+    robots_policy: str = Form(...),
+):
+    choices = {"global": None, "enforce": True, "ignore": False}
+    if robots_policy not in choices:
+        return _redirect(f"/sources/{source_id}", "Invalid robots policy", "danger")
+    with session_scope(request.app.state.engine) as session:
+        source = session.get(SourceDefinition, source_id)
+        if source is None:
+            return _redirect("/sources", "Source not found", "danger")
+        source.respect_robots_override = choices[robots_policy]
+        source.updated_at = utc_now()
+        audit.record(
+            session,
+            "ui",
+            "source.robots_policy_changed",
+            "source",
+            source.id,
+            {"override": robots_policy},
+        )
+        name = source.name
+    return _redirect(f"/sources/{source_id}", f"Robots policy for {name}: {robots_policy}")
 
 
 @router.post("/sources/{source_id}/deactivate")
@@ -579,6 +616,7 @@ def sources_collect(
     source_id: str,
     coverage_id: str = Form(default=""),
 ):
+    settings = request.app.state.settings
     # Keep the validation/snapshot read separate from the queue write.  In SQLite
     # WAL mode, upgrading a read transaction after another process has committed
     # can fail with SQLITE_BUSY_SNAPSHOT; busy_timeout cannot make that stale
@@ -599,7 +637,11 @@ def sources_collect(
         coverage = session.get(SourceCoverage, coverage_id) if coverage_id else None
         if coverage_id and (coverage is None or coverage.source_definition_id != source_id):
             return _redirect(f"/sources/{source_id}", "Coverage profile not found", "danger")
-        blockers = activation_blockers(source, coverage)
+        blockers = activation_blockers(
+            source,
+            coverage,
+            enforce_robots=robots_enforced(source, settings),
+        )
         if blockers:
             return _redirect(
                 f"/sources/{source_id}",
@@ -645,6 +687,7 @@ def sources_collect(
 
 @router.get("/sources/{source_id}", response_class=HTMLResponse)
 def source_detail(request: Request, source_id: str):
+    settings = request.app.state.settings
     with session_scope(request.app.state.engine) as session:
         source = session.scalars(
             select(SourceDefinition)
@@ -668,7 +711,8 @@ def source_detail(request: Request, source_id: str):
                 .limit(50)
             )
         )
-        blockers = activation_blockers(source)
+        effective_robots_enforced = robots_enforced(source, settings)
+        blockers = activation_blockers(source, enforce_robots=effective_robots_enforced)
         other_sources = list(
             session.execute(
                 select(SourceDefinition.id, SourceDefinition.name)
@@ -702,6 +746,8 @@ def source_detail(request: Request, source_id: str):
         lifecycle_badges=LIFECYCLE_BADGES,
         grade_badges=GRADE_BADGES,
         policy_badges=POLICY_BADGES,
+        global_robots_policy=settings.robots_policy,
+        effective_robots_enforced=effective_robots_enforced,
     )
 
 

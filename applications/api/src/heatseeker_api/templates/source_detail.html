@@ -24,6 +24,24 @@
 </div>
 {% endif %}
 
+<div class="card card-body py-2 mb-3">
+  <form method="post" action="/sources/{{ source.id }}/robots-policy" class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label small mb-1">Robots enforcement</label>
+      <select class="form-select form-select-sm" name="robots_policy">
+        <option value="global" {{ 'selected' if source.respect_robots_override is none }}>inherit global ({{ global_robots_policy }})</option>
+        <option value="enforce" {{ 'selected' if source.respect_robots_override is sameas true }}>always enforce</option>
+        <option value="ignore" {{ 'selected' if source.respect_robots_override is sameas false }}>treat as advisory</option>
+      </select>
+    </div>
+    <div class="col-md-auto"><button class="btn btn-sm btn-outline-secondary">Save policy</button></div>
+    <div class="col-md-6 small text-secondary">
+      Effective mode: <strong>{{ 'enforce' if effective_robots_enforced else 'ignore' }}</strong>.
+      Terms prohibitions, identity, rate limits, and politeness are always enforced.
+    </div>
+  </form>
+</div>
+
 <details class="card mb-3">
   <summary class="card-header">Edit canonical source metadata</summary>
   <div class="card-body">

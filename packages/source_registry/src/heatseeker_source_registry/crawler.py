@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from heatseeker_source_registry import COLLECTOR_VERSION
 from heatseeker_source_registry.distill import distill_document
-from heatseeker_source_registry.fetch import FetchTooLargeError, fetch_url
+from heatseeker_source_registry.fetch import FetchTooLargeError, fetch_url, http_client_kwargs
 from heatseeker_source_registry.identity import (
     SourceIdentityConflict,
     attach_identity,
@@ -43,7 +43,7 @@ from heatseeker_source_registry.models import (
     SourceDocument,
     SourceLifecycle,
 )
-from heatseeker_source_registry.policy import activation_blockers, policy_snapshot
+from heatseeker_source_registry.policy import activation_blockers, policy_snapshot, robots_enforced
 from heatseeker_source_registry.rawstore import store_bytes
 
 _SKIP_EXTENSIONS = (
@@ -126,7 +126,7 @@ class RobotsCache:
                 timeout=self._settings.fetch_timeout_seconds,
                 follow_redirects=True,
                 headers={"User-Agent": self._settings.crawler_user_agent},
-                transport=self._transport,
+                **http_client_kwargs(self._settings, self._transport),
             ) as client:
                 response = client.get(f"{host}/robots.txt")
             if response.status_code >= 500:
@@ -300,6 +300,8 @@ def _store_page(
     source: SourceDefinition,
     url: str,
     result,
+    *,
+    enforce_robots: bool = True,
 ) -> tuple[SourceDocument | None, bool, bool]:
     """Persist a fetched page with dedupe; returns (document, is_new_row, novel_content).
 
@@ -340,7 +342,11 @@ def _store_page(
         http_status=result.status_code,
         etag=result.etag,
         last_modified=result.last_modified,
-        access_policy_snapshot=policy_snapshot(source),
+        access_policy_snapshot=policy_snapshot(
+            source,
+            collection_url=url,
+            enforce_robots=enforce_robots,
+        ),
         targeting_snapshot={
             "schema_version": 1,
             "mode": "crawl",
@@ -370,7 +376,8 @@ def crawl_source(
         return {"outcome": "error", "error": "source not found"}
     if source.lifecycle_status not in (SourceLifecycle.ACTIVE, SourceLifecycle.DEGRADED):
         return {"outcome": "skipped", "error": f"source is {source.lifecycle_status}"}
-    blockers = activation_blockers(source)
+    enforce_robots = robots_enforced(source, settings)
+    blockers = activation_blockers(source, enforce_robots=enforce_robots)
     if blockers:
         return {"outcome": "blocked", "error": "; ".join(blockers)}
     if source.access_method == "manual" or not source.base_url:
@@ -436,7 +443,7 @@ def crawl_source(
             state.stopped_reason = "diminishing returns (stale streak)"
             break
 
-        if not robots.allowed(row.url):
+        if enforce_robots and not robots.allowed(row.url):
             row.status = FrontierStatus.BLOCKED
             row.outcome = "robots disallow"
             state.blocked += 1
@@ -492,7 +499,14 @@ def crawl_source(
             row.outcome = f"sitemap: {len(pages)} urls, {len(nested)} nested"
             continue
 
-        document, is_new, novel = _store_page(session, settings, source, row.url, result)
+        document, is_new, novel = _store_page(
+            session,
+            settings,
+            source,
+            row.url,
+            result,
+            enforce_robots=enforce_robots,
+        )
         row.status = FrontierStatus.FETCHED
         row.document_id = document.id
         row.outcome = "new content" if is_new else "unchanged"

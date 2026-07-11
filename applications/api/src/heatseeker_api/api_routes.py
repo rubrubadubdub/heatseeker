@@ -41,7 +41,11 @@ from heatseeker_source_registry.models import (
     SourceDefinition,
     SourceRelationship,
 )
-from heatseeker_source_registry.policy import activation_blockers, check_coverage_robots
+from heatseeker_source_registry.policy import (
+    activation_blockers,
+    check_coverage_robots,
+    robots_enforced,
+)
 from heatseeker_source_registry.scopes import active_scope, create_scope, set_active
 from heatseeker_source_registry.targeting import (
     CoverageSpec,
@@ -88,6 +92,7 @@ class SourceCreateRequest(BaseModel):
     rate_limit_policy: dict | None = None
     collection_scope: dict | None = None
     parser_profile: str | None = Field(default=None, max_length=200)
+    respect_robots_override: bool | None = None
     notes: str | None = Field(default=None, max_length=20_000)
 
     @field_validator("name")
@@ -152,6 +157,7 @@ class SourcePatchRequest(BaseModel):
     rate_limit_policy: dict | None = None
     collection_scope: dict | None = None
     parser_profile: str | None = Field(default=None, max_length=200)
+    respect_robots_override: bool | None = None
     notes: str | None = Field(default=None, max_length=20_000)
 
     @field_validator("name")
@@ -573,6 +579,7 @@ def source_to_dict(
         "parser_profile": source.parser_profile,
         "lifecycle_status": source.lifecycle_status,
         "robots_status": source.robots_status,
+        "respect_robots_override": source.respect_robots_override,
         "terms_status": source.terms_status,
         "last_success_at": source.last_success_at,
         "consecutive_failures": source.consecutive_failures,
@@ -845,6 +852,7 @@ def api_create_source(request: Request, payload: SourceCreateRequest) -> dict:
             rate_limit_policy=payload.rate_limit_policy,
             collection_scope=payload.collection_scope,
             parser_profile=payload.parser_profile,
+            respect_robots_override=payload.respect_robots_override,
             origin="user",
             notes=payload.notes,
         )
@@ -987,6 +995,7 @@ def api_patch_source(request: Request, source_id: str, payload: SourcePatchReque
             "rate_limit_policy",
             "collection_scope",
             "parser_profile",
+            "respect_robots_override",
             "notes",
         )
         changed_fields = []
@@ -1024,8 +1033,35 @@ def api_patch_source(request: Request, source_id: str, payload: SourcePatchReque
         return source_to_dict(source, coverages, include_pairings=True)
 
 
+@router.post("/sources/{source_id}/activate")
+def api_activate_source(request: Request, source_id: str) -> dict:
+    settings = request.app.state.settings
+    with session_scope(request.app.state.engine) as session:
+        source = session.get(SourceDefinition, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="source not found")
+        blockers = activation_blockers(
+            source,
+            enforce_robots=robots_enforced(source, settings),
+        )
+        if blockers:
+            raise HTTPException(status_code=409, detail="; ".join(blockers))
+        source.lifecycle_status = "active"
+        source.updated_at = utc_now()
+        audit.record(
+            session,
+            "api",
+            "source.activated",
+            "source",
+            source.id,
+            {"robots_enforced": robots_enforced(source, settings)},
+        )
+        return source_to_dict(source, list(source.coverages), include_pairings=True)
+
+
 @router.post("/sources/{source_id}/collect", status_code=202)
 def api_collect_source(request: Request, source_id: str, payload: SourceCollectRequest) -> dict:
+    settings = request.app.state.settings
     with session_scope(request.app.state.engine) as session:
         source = session.get(SourceDefinition, source_id)
         if source is None:
@@ -1038,7 +1074,11 @@ def api_collect_source(request: Request, source_id: str, payload: SourceCollectR
         coverage = session.get(SourceCoverage, payload.coverage_id) if payload.coverage_id else None
         if payload.coverage_id and (coverage is None or coverage.source_definition_id != source_id):
             raise HTTPException(status_code=404, detail="source coverage not found")
-        blockers = activation_blockers(source, coverage)
+        blockers = activation_blockers(
+            source,
+            coverage,
+            enforce_robots=robots_enforced(source, settings),
+        )
         if blockers:
             raise HTTPException(status_code=409, detail="; ".join(blockers))
         scope = (
