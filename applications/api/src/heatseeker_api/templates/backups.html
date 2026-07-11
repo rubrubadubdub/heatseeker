@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Backups · Heatseeker{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Backups</h1>
+  <form method="post" action="/backups/create">
+    <button class="btn btn-primary btn-sm">Create backup now</button>
+  </form>
+</div>
+<p class="text-secondary small">Consistent online snapshot (<code>VACUUM INTO</code>) of the
+database plus the raw-evidence store, written to <code class="mono">{{ backups_dir }}</code>.
+Restore is CLI-only (it replaces the live database):
+<code>uv run heatseeker backup restore &lt;path&gt; --yes</code> with API and worker stopped.</p>
+
+<div class="table-responsive">
+  <table class="table table-sm align-middle">
+    <thead><tr><th>created</th><th>path</th><th>schema</th><th>raw store</th><th>app</th></tr></thead>
+    <tbody>
+      {% for b in backups %}
+      <tr>
+        <td>{{ b.created_at[:19] }}</td>
+        <td class="mono small">{{ b.path }}</td>
+        <td class="mono">{{ b.alembic_version }}</td>
+        <td>{% if b.raw_included %}<span class="badge text-bg-success">included</span>{% else %}<span class="badge text-bg-secondary">empty</span>{% endif %}</td>
+        <td class="mono small">{{ b.app_version }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-secondary">No backups yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

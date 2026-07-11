@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Heatseeker{% endblock %}
+{% block content %}
+<div class="alert alert-warning">
+  <h4 class="alert-heading">{{ title }}</h4>
+  <p class="mb-0">{{ detail }}</p>
+</div>
+<a href="/" class="btn btn-outline-secondary btn-sm">Back to dashboard</a>
+{% endblock %}

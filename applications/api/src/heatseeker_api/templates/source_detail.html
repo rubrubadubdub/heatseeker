@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}{{ source.name }} · Heatseeker{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb">
+  <li class="breadcrumb-item"><a href="/sources">Sources</a></li>
+  <li class="breadcrumb-item active">{{ source.name }}</li>
+</ol></nav>
+
+<div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+  <h1 class="h4 mb-0">{{ source.name }}</h1>
+  <span class="badge text-bg-{{ lifecycle_badges.get(source.lifecycle_status, 'secondary') }}">{{ source.lifecycle_status }}</span>
+  <span class="badge text-bg-{{ policy_badges.get(source.robots_status, 'secondary') }}">robots: {{ source.robots_status }}</span>
+  <span class="badge text-bg-{{ policy_badges.get(source.terms_status, 'secondary') }}">terms: {{ source.terms_status }}</span>
+  {% if source.lifecycle_status in ('active', 'degraded') %}
+  <form method="post" action="/sources/{{ source.id }}/collect">
+    <button class="btn btn-sm btn-primary">Collect now</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if blockers %}
+<div class="alert alert-warning py-2 small">
+  Not collectable: {{ blockers | join('; ') }}
+</div>
+{% endif %}
+
+<details class="card mb-3">
+  <summary class="card-header">Edit canonical source metadata</summary>
+  <div class="card-body">
+    <form method="post" action="/sources/{{ source.id }}/edit" class="row g-2">
+      <div class="col-md-4"><label class="form-label small">Name</label><input class="form-control form-control-sm" name="name" value="{{ source.name }}" required></div>
+      <div class="col-md-2"><label class="form-label small">Category</label><input class="form-control form-control-sm mono" name="source_category" value="{{ source.source_category }}" required></div>
+      <div class="col-md-4"><label class="form-label small">Base URL</label><input class="form-control form-control-sm" type="url" name="base_url" value="{{ source.base_url or '' }}"></div>
+      <div class="col-md-2"><label class="form-label small">Access</label><select class="form-select form-select-sm" name="access_method">{% for method in ('api','bulk','rss','sitemap','html','rendered','manual') %}<option {{ 'selected' if method == source.access_method }}>{{ method }}</option>{% endfor %}</select></div>
+      <div class="col-md-2"><label class="form-label small">Authority tier</label><input class="form-control form-control-sm" type="number" min="1" max="7" name="authority_tier" value="{{ source.authority_tier }}"></div>
+      <div class="col-md-3"><label class="form-label small">Geography summary</label><input class="form-control form-control-sm mono" name="geo_codes" value="{{ (source.geo_codes or []) | join(', ') }}"></div>
+      <div class="col-md-2"><label class="form-label small">Language</label><input class="form-control form-control-sm" name="language" value="{{ source.language or '' }}"></div>
+      <div class="col-md-2"><label class="form-label small">Update cadence</label><input class="form-control form-control-sm" name="expected_update_frequency" value="{{ source.expected_update_frequency or '' }}"></div>
+      <div class="col-md-3"><label class="form-label small">Authentication type</label><input class="form-control form-control-sm" name="authentication_type" value="{{ source.authentication_type or '' }}" placeholder="type only; never a secret"></div>
+      <div class="col-md-3"><label class="form-label small">Parser profile</label><input class="form-control form-control-sm mono" name="parser_profile" value="{{ source.parser_profile or '' }}"></div>
+      <div class="col-md-7"><label class="form-label small">Notes</label><input class="form-control form-control-sm" name="notes" value="{{ source.notes or '' }}"></div>
+      <div class="col-md-auto align-self-end"><button class="btn btn-sm btn-primary">Save source</button></div>
+    </form>
+  </div>
+</details>
+
+<section class="mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h2 class="h6 mb-0">Contextual coverage pairings</h2>
+    <span class="small text-secondary">Profiles are OR alternatives; dimensions inside one profile stay AND-correlated.</span>
+  </div>
+  <div class="row g-2">
+    {% for coverage in coverages %}
+    <div class="col-lg-6">
+      <div class="card h-100 {{ 'opacity-50' if coverage.lifecycle_status == 'disabled' }}">
+        <div class="card-header d-flex justify-content-between gap-2">
+          <span>{{ coverage.name }} <code class="mono">{{ coverage.coverage_key }}</code></span>
+          <span class="badge text-bg-{{ 'success' if coverage.lifecycle_status == 'active' else 'secondary' }}">{{ coverage.lifecycle_status }}</span>
+          {% if coverage.valid_from and coverage.valid_from > now %}<span class="badge text-bg-warning">not yet valid</span>{% endif %}
+          {% if coverage.valid_to and coverage.valid_to < now %}<span class="badge text-bg-dark">expired</span>{% endif %}
+        </div>
+        <div class="card-body py-2 small">
+          {% for target in coverage.targets %}
+            <span class="badge text-bg-{{ 'danger' if target.polarity == 'exclude' else 'info' }}"
+                  title="{{ target.match_mode }}">
+              {{ 'NOT ' if target.polarity == 'exclude' }}{{ target.dimension }}:{{ target.target_key }}
+            </span>
+          {% else %}
+            <span class="badge text-bg-warning">unknown / no explicit targets</span>
+          {% endfor %}
+          <div class="text-secondary mt-2">
+            priority {{ coverage.priority }} · relevance {{ coverage.relevance }} · confidence {{ coverage.confidence }}
+            {% if coverage.authority_tier_override %} · authority override {{ coverage.authority_tier_override }}{% endif %}
+          </div>
+          {% if coverage.valid_from or coverage.valid_to %}<div class="text-secondary">valid {{ coverage.valid_from or 'from creation' }} → {{ coverage.valid_to or 'open-ended' }}</div>{% endif %}
+          <div class="text-secondary">
+            origin {{ coverage.origin }}
+            {% if coverage.origin_pack_id %} · {{ coverage.origin_pack_id }} v{{ coverage.origin_pack_version or '?' }} · {{ (coverage.origin_pack_hash or 'legacy')[:10] }}{% endif %}
+          </div>
+          {% if coverage_has_distinct_endpoint(source, coverage) %}
+          <div class="mt-1">endpoint robots:
+            <span class="badge text-bg-{{ policy_badges.get(coverage.robots_status, 'secondary') }}">{{ coverage.robots_status }}</span>
+          </div>
+          {% else %}
+          <div class="text-secondary mt-1">endpoint policy inherited from canonical source</div>
+          {% endif %}
+          <div class="d-flex gap-1 mt-2">
+            {% if coverage_has_distinct_endpoint(source, coverage) %}
+            <form method="post" action="/sources/{{ source.id }}/coverages/{{ coverage.id }}/check-policy">
+              <button class="btn btn-sm btn-outline-secondary py-0">check endpoint policy</button>
+            </form>
+            {% endif %}
+            {% if source.lifecycle_status in ('active', 'degraded') and coverage.lifecycle_status == 'active' %}
+            <form method="post" action="/sources/{{ source.id }}/collect">
+              <input type="hidden" name="coverage_id" value="{{ coverage.id }}">
+              <button class="btn btn-sm btn-primary py-0">collect for this pairing</button>
+            </form>
+            {% endif %}
+            {% if coverage.lifecycle_status == 'active' %}
+            <form method="post" action="/sources/{{ source.id }}/coverages/{{ coverage.id }}/disable">
+              <button class="btn btn-sm btn-outline-warning py-0">disable pairing</button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="col-12"><div class="alert alert-warning py-2">This source is unpaired. Its relevance is unknown until a coverage profile is added.</div></div>
+    {% endfor %}
+  </div>
+
+  <details class="card mt-2">
+    <summary class="card-header">Add or update a manual coverage profile</summary>
+    <div class="card-body">
+      <form method="post" action="/sources/{{ source.id }}/coverages/create" class="row g-2">
+        <div class="col-md-3"><input class="form-control form-control-sm mono" name="coverage_key" placeholder="stable_key (blank = generated)"></div>
+        <div class="col-md-3"><input class="form-control form-control-sm" name="name" placeholder="Profile name"></div>
+        <div class="col-md-3"><input class="form-control form-control-sm mono" name="industry_ids" placeholder="industries: scaffolding_anz"></div>
+        <div class="col-md-3"><input class="form-control form-control-sm mono" name="region_codes" placeholder="regions: AU-QLD, NZ"></div>
+        <div class="col-md-2"><input class="form-control form-control-sm mono" name="dimension" placeholder="extra dimension"></div>
+        <div class="col-md-3"><input class="form-control form-control-sm mono" name="target_key" placeholder="target value"></div>
+        <div class="col-md-2"><select class="form-select form-select-sm" name="polarity"><option>include</option><option>exclude</option></select></div>
+        <div class="col-md-1"><input class="form-control form-control-sm" type="number" name="priority" min="0" max="100" value="50" title="Priority"></div>
+        <div class="col-md-1"><input class="form-control form-control-sm" type="number" name="relevance" min="0" max="1" step="0.05" value="1" title="Relevance"></div>
+        <div class="col-md-1"><input class="form-control form-control-sm" type="number" name="confidence" min="0" max="1" step="0.05" value="1" title="Confidence"></div>
+        <div class="col-md-1"><input class="form-control form-control-sm" type="number" name="authority_tier_override" min="1" max="7" placeholder="tier" title="Authority override"></div>
+        <div class="col-md-auto"><button class="btn btn-sm btn-success">Save pairing</button></div>
+      </form>
+    </div>
+  </details>
+</section>
+
+<div class="row g-4">
+  <div class="col-lg-5">
+    <table class="table table-sm">
+      <tbody>
+        <tr><th>category</th><td>{{ source.source_category }}</td></tr>
+        <tr><th>url</th><td class="small"><a href="{{ source.base_url }}" target="_blank" rel="noopener">{{ source.base_url }}</a></td></tr>
+        <tr><th>access</th><td>{{ source.access_method }}</td></tr>
+        <tr><th>language</th><td>{{ source.language or 'unknown' }}</td></tr>
+        <tr><th>update cadence</th><td>{{ source.expected_update_frequency or 'unknown' }}</td></tr>
+        <tr><th>authentication</th><td>{{ source.authentication_type or 'none / unknown' }}</td></tr>
+        <tr><th>parser profile</th><td class="mono small">{{ source.parser_profile or 'default' }}</td></tr>
+        <tr><th>authority tier</th><td>{{ source.authority_tier }} (1 = official record … 7 = weak)</td></tr>
+        <tr><th>jurisdiction</th><td>{{ source.jurisdiction }} <span class="mono small">{{ (source.geo_codes or []) | join(', ') }}</span></td></tr>
+        <tr><th>origin</th><td>{{ source.origin }}{% if source.pack_id %} · {{ source.pack_id }}{% endif %}</td></tr>
+        <tr><th>robots checked</th><td class="small">{{ source.robots_checked_at or 'never' }}</td></tr>
+        <tr><th>last success</th><td class="small">{{ source.last_success_at or '—' }}</td></tr>
+        <tr><th>last failure</th><td class="small">{{ source.last_failure_at or '—' }}
+          {% if source.consecutive_failures %}<span class="badge text-bg-warning">{{ source.consecutive_failures }} consecutive</span>{% endif %}</td></tr>
+        {% if source.last_error %}<tr><th>last error</th><td class="small text-danger mono">{{ source.last_error[:300] }}</td></tr>{% endif %}
+        {% if source.notes %}<tr><th>notes</th><td class="small">{{ source.notes }}</td></tr>{% endif %}
+      </tbody>
+    </table>
+    <h6>Stable identities</h6>
+    <ul class="list-group list-group-flush small mb-3">
+      {% for identity in identities %}
+      <li class="list-group-item px-0"><span class="badge text-bg-secondary">{{ identity.identity_type }}</span>
+        <span class="mono">{{ identity.identity_value }}</span>
+        {% if identity.is_primary %}<span class="badge text-bg-primary">primary</span>{% endif %}
+      </li>
+      {% else %}<li class="list-group-item px-0 text-secondary">No stable aliases recorded.</li>{% endfor %}
+    </ul>
+
+    <h6>Source lineage / independence</h6>
+    <ul class="list-group list-group-flush small">
+      {% for direction, relationship in relationships %}
+      <li class="list-group-item px-0"><span class="badge text-bg-warning">{{ relationship.relationship_type }}</span>
+        <span class="badge text-bg-secondary">{{ direction }}</span>
+        <span class="mono">{{ (relationship.related_source_definition_id if direction == 'outbound' else relationship.source_definition_id)[:8] }}</span>
+        · confidence {{ relationship.confidence }}</li>
+      {% else %}<li class="list-group-item px-0 text-secondary">No ownership, syndication, or derivation links recorded.</li>{% endfor %}
+    </ul>
+    {% if other_sources %}
+    <form method="post" action="/sources/{{ source.id }}/relationships/create" class="row g-1 mt-2">
+      <div class="col-6"><select class="form-select form-select-sm" name="related_source_id">{% for id, name in other_sources %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></div>
+      <div class="col-4"><select class="form-select form-select-sm" name="relationship_type"><option>same_owner</option><option>syndicates_from</option><option>derives_from</option><option>mirrors</option><option>successor_of</option></select></div>
+      <input type="hidden" name="confidence" value="1">
+      <div class="col-2"><button class="btn btn-sm btn-outline-warning">Link</button></div>
+    </form>
+    {% endif %}
+  </div>
+  <div class="col-lg-7">
+    <h6>Collected documents ({{ documents | length }})</h6>
+    <div class="table-responsive">
+      <table class="table table-sm small">
+        <thead><tr><th>retrieved</th><th>url</th><th>type</th><th>size</th><th>seen</th></tr></thead>
+        <tbody>
+          {% for d in documents %}
+          <tr>
+            <td><a href="/evidence/{{ d.id }}">{{ d.retrieved_at.strftime('%Y-%m-%d %H:%M') }}</a></td>
+            <td class="text-truncate" style="max-width: 18rem">{{ d.source_url }}</td>
+            <td>{{ (d.content_type or '?').split(';')[0] }}</td>
+            <td>{{ '{:,}'.format(d.size_bytes) }} B</td>
+            <td>{{ d.retrieval_count }}×</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-secondary">Nothing collected yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

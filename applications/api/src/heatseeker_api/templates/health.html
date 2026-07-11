@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Health · Heatseeker{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center gap-3 mb-4">
+  <h1 class="h3 mb-0">System health</h1>
+  {% if report.status == 'ok' %}
+    <span class="badge text-bg-success fs-6">OK</span>
+  {% else %}
+    <span class="badge text-bg-danger fs-6">DEGRADED</span>
+  {% endif %}
+</div>
+
+<div class="row g-3">
+  {% for name, check in report.checks.items() %}
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-subtitle mb-2 d-flex justify-content-between">
+          <span>{{ name.replace('_', ' ') }}</span>
+          {% set colour = {'ok': 'success', 'warn': 'warning', 'absent': 'secondary',
+                           'stale': 'warning', 'fail': 'danger'}.get(check.status, 'secondary') %}
+          <span class="badge text-bg-{{ colour }}">{{ check.status }}</span>
+        </h6>
+        <pre class="json mb-0">{{ check | tojson(indent=2) }}</pre>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

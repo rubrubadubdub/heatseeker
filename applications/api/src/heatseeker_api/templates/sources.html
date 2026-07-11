@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}Sources · Heatseeker{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+  <h1 class="h3 mb-0">Sources</h1>
+  <div class="d-flex gap-2">
+    <form method="post" action="/sources/sync-seeds">
+      <button class="btn btn-sm btn-outline-primary">Sync from industry packs</button>
+    </form>
+    <form method="post" action="/sources/check-all-policies">
+      <button class="btn btn-sm btn-outline-secondary">Check all policies</button>
+    </form>
+    <form method="post" action="/sources/collect-due">
+      <button class="btn btn-sm btn-primary" title="Collect every due source with politeness delays">Collect due</button>
+    </form>
+    <form method="post" action="/sources/run-maintenance">
+      <button class="btn btn-sm btn-outline-warning" title="Grade sources, auto-deprecate failures, re-check stale robots">Run maintenance</button>
+    </form>
+  </div>
+</div>
+<p class="small text-secondary mb-1">
+  Research scope:
+  {% if scope_name %}
+    <span class="badge text-bg-primary">{{ scope_name }}</span>
+    <span class="mono">{{ scope_codes | join(', ') }}</span>
+    {% for industry in scope_industries %}
+      <span class="badge text-bg-info">{{ industry }}</span>
+    {% endfor %}
+    — <a href="/scopes">change</a>
+  {% else %}<a href="/scopes">set one</a>{% endif %}
+  ·
+  {% if scope_only %}
+    showing in-scope only — <a href="/sources">show all</a>
+  {% else %}
+    <a href="/sources?scope_only=1">show in-scope only</a>
+  {% endif %}
+</p>
+<p class="small text-secondary">Collection requires: robots allowed (or N/A) + terms not
+prohibited + source activated. Every action is audited.</p>
+
+<form method="get" action="/sources" class="card card-body py-2 mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-2">
+      <label class="form-label small mb-1">Industry</label>
+      <select class="form-select form-select-sm" name="industry_id">
+        <option value="">all industries</option>
+        {% for value in industry_choices %}
+        <option value="{{ value }}" {{ 'selected' if value == industry_id }}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small mb-1">Region</label>
+      <select class="form-select form-select-sm" name="region_code">
+        <option value="">all regions</option>
+        {% for value in region_choices %}
+        <option value="{{ value }}" {{ 'selected' if value == region_code }}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small mb-1">Category</label>
+      <select class="form-select form-select-sm" name="category">
+        <option value="">all categories</option>
+        {% for value in category_choices %}
+        <option value="{{ value }}" {{ 'selected' if value == category_filter }}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small mb-1">Lifecycle</label>
+      <select class="form-select form-select-sm" name="status">
+        <option value="">all states</option>
+        {% for value in lifecycle_choices %}
+        <option value="{{ value }}" {{ 'selected' if value == status_filter }}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2 form-check ms-2 mb-1">
+      <input class="form-check-input" type="checkbox" name="include_unknown" value="1"
+             id="include-unknown" {{ 'checked' if include_unknown }}>
+      <label class="form-check-label small" for="include-unknown">include unknown coverage</label>
+    </div>
+    <div class="col-md-auto"><button class="btn btn-sm btn-primary">Filter</button></div>
+    <div class="col-md-auto"><a class="btn btn-sm btn-outline-secondary" href="/sources">Clear</a></div>
+  </div>
+</form>
+
+<details class="card mb-3">
+  <summary class="card-header">Register a source</summary>
+  <div class="card-body">
+    <form method="post" action="/sources/create" class="row g-2">
+      <div class="col-md-4"><input class="form-control form-control-sm" name="name" placeholder="Source name" required></div>
+      <div class="col-md-2"><input class="form-control form-control-sm mono" name="source_category" placeholder="category" required></div>
+      <div class="col-md-4"><input class="form-control form-control-sm" name="base_url" type="url" placeholder="https://…"></div>
+      <div class="col-md-2"><select class="form-select form-select-sm" name="access_method">
+        {% for method in ('api','bulk','rss','sitemap','html','rendered','manual') %}<option>{{ method }}</option>{% endfor %}
+      </select></div>
+      <div class="col-md-2"><input class="form-control form-control-sm" name="authority_tier" type="number" min="1" max="7" value="5" title="Authority tier"></div>
+      <div class="col-md-3"><input class="form-control form-control-sm mono" name="geo_codes" placeholder="AU, NZ (legacy summary)"></div>
+      <div class="col-md-2"><input class="form-control form-control-sm" name="language" placeholder="language"></div>
+      <div class="col-md-2"><input class="form-control form-control-sm" name="expected_update_frequency" placeholder="update cadence"></div>
+      <div class="col-md-3"><input class="form-control form-control-sm" name="notes" placeholder="notes"></div>
+      <div class="col-md-auto"><button class="btn btn-sm btn-success">Register</button></div>
+    </form>
+    <div class="form-text">Registration creates a canonical candidate. Add coherent industry/region coverage on its detail page; policy approval is still required before collection.</div>
+  </div>
+</details>
+
+<div class="table-responsive">
+  <table class="table table-sm align-middle">
+    <thead><tr>
+      <th>source</th><th>tier</th><th>grade</th><th>coverage pairings</th><th>lifecycle</th><th>robots</th>
+      <th>terms</th><th>docs</th><th style="min-width:16rem">actions</th>
+    </tr></thead>
+    <tbody>
+      {% for item in items %}
+      {% set s = item.source %}
+      <tr class="{{ 'opacity-50' if not item.in_scope }}">
+        <td>
+          <a href="/sources/{{ s.id }}">{{ s.name }}</a>
+          <div class="small text-secondary">{{ s.source_category }} · {{ s.access_method }}
+            {% if not item.in_scope %}<span class="badge text-bg-light">out of scope</span>{% endif %}
+          </div>
+        </td>
+        <td>{{ s.authority_tier }}</td>
+        <td>
+          <span class="badge text-bg-{{ grade_badges.get(s.quality_grade or 'U', 'secondary') }}"
+                title="{{ (s.grade_detail or {}) | tojson }}">{{ s.quality_grade or 'U' }}</span>
+          {% if s.quality_score is not none %}<span class="small text-secondary">{{ s.quality_score }}</span>{% endif %}
+          {% if s.lifecycle_status == 'deprecated' %}
+            <div class="small text-danger" title="{{ s.deprecation_reason }}">auto-deprecated</div>
+            <form method="post" action="/sources/{{ s.id }}/reinstate">
+              <button class="btn btn-sm btn-outline-danger py-0 mt-1">reinstate</button>
+            </form>
+          {% endif %}
+          {% if s.retry_after_until %}<div class="small text-warning">throttled</div>{% endif %}
+        </td>
+        <td class="small">
+          {% if item.coverage_count %}
+            <span class="badge text-bg-info">{{ item.matching_count }} / {{ item.coverage_count }} match</span>
+            <div class="mt-1">
+            {% for coverage in s.coverages if coverage.lifecycle_status == 'active' %}
+              <span class="badge text-bg-secondary" title="{{ coverage.name }}">{{ coverage.coverage_key }}</span>
+            {% endfor %}
+            </div>
+          {% else %}
+            <span class="badge text-bg-warning">unpaired / unknown</span>
+          {% endif %}
+        </td>
+        <td><span class="badge text-bg-{{ lifecycle_badges.get(s.lifecycle_status, 'secondary') }}">{{ s.lifecycle_status }}</span></td>
+        <td><span class="badge text-bg-{{ policy_badges.get(s.robots_status, 'secondary') }}">{{ s.robots_status }}</span></td>
+        <td>
+          <form method="post" action="/sources/{{ s.id }}/terms" class="d-inline">
+            <select name="terms_status" class="form-select form-select-sm d-inline w-auto badge-select"
+                    onchange="this.form.submit()">
+              {% for t in terms_choices %}
+              <option value="{{ t }}" {{ 'selected' if t == s.terms_status }}>{{ t }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </td>
+        <td>{{ doc_counts.get(s.id, 0) }}</td>
+        <td class="d-flex gap-1 flex-wrap">
+          {% if s.access_method != 'manual' %}
+          <form method="post" action="/sources/{{ s.id }}/check-policy">
+            <button class="btn btn-sm btn-outline-secondary py-0">robots?</button>
+          </form>
+          {% endif %}
+          {% if s.lifecycle_status in ('candidate', 'disabled', 'proposed') %}
+          <form method="post" action="/sources/{{ s.id }}/activate">
+            <button class="btn btn-sm btn-outline-success py-0"
+              {% if item.blockers %}title="{{ item.blockers | join('; ') }}"{% endif %}>activate</button>
+          </form>
+          {% endif %}
+          {% if s.lifecycle_status in ('active', 'degraded') %}
+          <form method="post" action="/sources/{{ s.id }}/collect">
+            <button class="btn btn-sm btn-primary py-0">collect now</button>
+          </form>
+          {% if s.access_method in ('html', 'sitemap') %}
+          <form method="post" action="/sources/{{ s.id }}/crawl">
+            <button class="btn btn-sm btn-outline-primary py-0"
+                    title="Budgeted site walk: follows internal links, proposes vocabulary-matched external domains">crawl</button>
+          </form>
+          {% endif %}
+          <form method="post" action="/sources/{{ s.id }}/deactivate">
+            <button class="btn btn-sm btn-outline-dark py-0">disable</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-secondary">No sources yet — click
+        <strong>Sync from industry packs</strong> to import the scaffolding seed list.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

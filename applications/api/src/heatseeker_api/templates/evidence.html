@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Evidence · Heatseeker{% endblock %}
+{% block content %}
+<h1 class="h3 mb-2">Evidence</h1>
+<p class="small text-secondary">Immutable raw documents, content-addressed by SHA-256.
+Every retrieval records the access policy it was collected under. Re-fetches of identical
+content bump the seen-count instead of duplicating.</p>
+
+<div class="table-responsive">
+  <table class="table table-sm align-middle">
+    <thead><tr><th>retrieved</th><th>source</th><th>coverage</th><th>url</th><th>type</th><th>size</th><th>hash</th><th>seen</th></tr></thead>
+    <tbody>
+      {% for row in documents %}
+      {% set d = row.doc %}
+      <tr>
+        <td><a href="/evidence/{{ d.id }}">{{ d.retrieved_at.strftime('%Y-%m-%d %H:%M:%S') }}</a></td>
+        <td class="small">{{ row.source_name }}</td>
+        <td class="mono small">{{ (d.source_coverage_id or 'unscoped')[:12] }}</td>
+        <td class="small text-truncate" style="max-width: 20rem">{{ d.source_url }}</td>
+        <td class="small">{{ (d.content_type or '?').split(';')[0] }}</td>
+        <td class="small">{{ '{:,}'.format(d.size_bytes) }} B</td>
+        <td class="mono small">{{ d.content_hash[:12] }}</td>
+        <td>{{ d.retrieval_count }}×</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-secondary">No evidence collected yet — activate a
+        source and click <em>collect now</em> on the <a href="/sources">Sources</a> page.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+<div class="d-flex gap-2 mb-2 small">
+  {% for status, count in job_counts.items() %}
+    <span class="badge text-bg-{{ status_badges.get(status, 'secondary') }}">{{ status }} {{ count }}</span>
+  {% endfor %}
+</div>
+<div class="table-responsive">
+  <table class="table table-sm table-hover align-middle">
+    <thead>
+      <tr>
+        <th>id</th><th>type</th><th>status</th><th>priority</th><th>attempts</th>
+        <th>created</th><th>finished</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in jobs %}
+      <tr>
+        <td><a href="/jobs/{{ job.id }}" class="mono">{{ job.id[:8] }}</a></td>
+        <td>{{ job.job_type }}</td>
+        <td><span class="badge text-bg-{{ status_badges.get(job.status, 'secondary') }}">{{ job.status }}</span>
+            {% if job.cancel_requested and job.status == 'running' %}<span class="badge text-bg-warning">cancelling</span>{% endif %}</td>
+        <td class="small">{{ priority_classes.get(job.priority, job.priority) }}</td>
+        <td class="small">{{ job.attempts }}/{{ job.max_attempts }}</td>
+        <td class="small text-secondary">{{ job.created_at.strftime('%H:%M:%S') }}</td>
+        <td class="small text-secondary">{{ job.finished_at.strftime('%H:%M:%S') if job.finished_at else '—' }}</td>
+        <td>
+          {% if job.status in ('queued', 'running') %}
+          <form method="post" action="/jobs/{{ job.id }}/cancel" class="d-inline">
+            <button class="btn btn-outline-warning btn-sm py-0">cancel</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-secondary">No jobs{% if status_filter %} with status "{{ status_filter }}"{% endif %}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

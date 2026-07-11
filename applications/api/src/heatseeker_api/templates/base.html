@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Heatseeker{% endblock %}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
+  <script src="/static/vendor/htmx.min.js" defer></script>
+  <style>
+    .mono { font-family: var(--bs-font-monospace); font-size: .85em; }
+    pre.json { background: var(--bs-tertiary-bg); padding: .75rem; border-radius: .375rem;
+               max-height: 24rem; overflow: auto; font-size: .8em; }
+    .nav-link.active { font-weight: 600; }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg border-bottom mb-4">
+  <div class="container">
+    <a class="navbar-brand" href="/">🔥 Heatseeker</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="nav">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link {{ 'active' if active == 'dashboard' }}" href="/">Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link {{ 'active' if active == 'sources' }}" href="/sources">Sources</a></li>
+        <li class="nav-item"><a class="nav-link {{ 'active' if active == 'evidence' }}" href="/evidence">Evidence</a></li>
+        <li class="nav-item"><a class="nav-link {{ 'active' if active == 'scopes' }}" href="/scopes">Scope</a></li>
+        <li class="nav-item"><a class="nav-link {{ 'active' if active == 'jobs' }}" href="/jobs">Jobs</a></li>
+        <li class="nav-item"><a class="nav-link {{ 'active' if active == 'packs' }}" href="/packs">Packs</a></li>
+        <li class="nav-item"><a class="nav-link {{ 'active' if active == 'backups' }}" href="/backups">Backups</a></li>
+        <li class="nav-item"><a class="nav-link {{ 'active' if active == 'health' }}" href="/health-ui">Health</a></li>
+      </ul>
+      <span class="navbar-text small">local · <a href="/docs" class="link-secondary">API docs</a></span>
+    </div>
+  </div>
+</nav>
+<main class="container pb-5">
+  {% if msg %}
+  <div class="alert alert-{{ level }} alert-dismissible fade show" role="alert">
+    {{ msg }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+<footer class="border-top py-3">
+  <div class="container small text-secondary">
+    Heatseeker — niche industry intelligence platform · Phase 1
+  </div>
+</footer>
+<script src="/static/vendor/bootstrap.bundle.min.js"></script>
+</body>
+</html>

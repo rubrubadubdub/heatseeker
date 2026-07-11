@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Evidence {{ doc.content_hash[:12] }} · Heatseeker{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb">
+  <li class="breadcrumb-item"><a href="/evidence">Evidence</a></li>
+  <li class="breadcrumb-item active mono">{{ doc.content_hash[:16] }}</li>
+</ol></nav>
+
+<div class="row g-4">
+  <div class="col-lg-5">
+    <table class="table table-sm">
+      <tbody>
+        <tr><th>source</th><td><a href="/sources/{{ doc.source_definition_id }}">{{ source_name }}</a></td></tr>
+        <tr><th>url</th><td class="small"><a href="{{ doc.source_url }}" target="_blank" rel="noopener">{{ doc.source_url }}</a></td></tr>
+        {% if doc.canonical_url %}<tr><th>final url</th><td class="small">{{ doc.canonical_url }}</td></tr>{% endif %}
+        <tr><th>retrieved</th><td class="small">{{ doc.retrieved_at }}</td></tr>
+        <tr><th>first seen</th><td class="small">{{ doc.first_seen_at }}</td></tr>
+        <tr><th>last seen</th><td class="small">{{ doc.last_seen_at }} ({{ doc.retrieval_count }}×)</td></tr>
+        <tr><th>http status</th><td>{{ doc.http_status }}</td></tr>
+        <tr><th>content type</th><td class="small">{{ doc.content_type }}</td></tr>
+        <tr><th>size</th><td>{{ '{:,}'.format(doc.size_bytes) }} bytes</td></tr>
+        <tr><th>sha-256</th><td class="mono small">{{ doc.content_hash }}</td></tr>
+        <tr><th>raw path</th><td class="mono small">data/raw/{{ doc.raw_storage_path }}</td></tr>
+        <tr><th>collector</th><td class="small">{{ doc.collector_version }}</td></tr>
+      </tbody>
+    </table>
+    <h6>Access policy at retrieval</h6>
+    <pre class="json">{{ doc.access_policy_snapshot | tojson(indent=2) }}</pre>
+    <h6>Targeting context at retrieval</h6>
+    {% if doc.targeting_snapshot %}
+      <pre class="json">{{ doc.targeting_snapshot | tojson(indent=2) }}</pre>
+    {% else %}
+      <p class="small text-secondary">Legacy/unscoped retrieval — no coverage snapshot was recorded.</p>
+    {% endif %}
+  </div>
+  <div class="col-lg-7">
+    <h6>Content preview {% if preview %}<span class="text-secondary small">(first 40 KB, escaped)</span>{% endif %}</h6>
+    {% if preview %}
+      <pre class="json" style="max-height: 42rem">{{ preview | safe }}</pre>
+    {% else %}
+      <p class="text-secondary">Binary or non-text content — inspect the raw file at
+        <code class="mono">data/raw/{{ doc.raw_storage_path }}</code>.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

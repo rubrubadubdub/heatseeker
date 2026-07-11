@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Heatseeker{% endblock %}
+{% block content %}
+<h1 class="h3 mb-4">Dashboard</h1>
+
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-lg-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-subtitle text-secondary mb-2">System health</h6>
+        {% if health.status == 'ok' %}
+          <span class="badge text-bg-success fs-6">OK</span>
+        {% else %}
+          <span class="badge text-bg-danger fs-6">DEGRADED</span>
+        {% endif %}
+        <div class="small mt-2">
+          worker:
+          {% set w = health.checks.worker.status %}
+          <span class="badge text-bg-{{ 'success' if w == 'ok' else 'secondary' }}">{{ w }}</span>
+        </div>
+        <a href="/health-ui" class="stretched-link"></a>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-subtitle text-secondary mb-2">Jobs</h6>
+        <div class="fs-4">{{ jobs_total }}</div>
+        <div class="small">
+          {% for status, count in job_counts.items() %}
+            <span class="badge text-bg-{{ status_badges.get(status, 'secondary') }}">{{ status }} {{ count }}</span>
+          {% else %}
+            <span class="text-secondary">none yet</span>
+          {% endfor %}
+        </div>
+        <a href="/jobs" class="stretched-link"></a>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-subtitle text-secondary mb-2">Industry packs</h6>
+        <div class="fs-4">{{ packs | length }}</div>
+        <div class="small">
+          {% for p in packs %}
+            <span class="badge text-bg-{{ 'success' if p.valid else 'danger' }}">{{ p.pack_id }}</span>
+          {% endfor %}
+        </div>
+        <a href="/packs" class="stretched-link"></a>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-subtitle text-secondary mb-2">Backups</h6>
+        <div class="fs-4">{{ backups | length }}{% if backups %}<span class="fs-6 text-secondary"> recent</span>{% endif %}</div>
+        <div class="small text-secondary">
+          {% if backups %}latest: {{ backups[0].created_at[:19] }}{% else %}none yet{% endif %}
+        </div>
+        <a href="/backups" class="stretched-link"></a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2 class="h5">Recent jobs</h2>
+{% if recent_jobs %}
+<div class="table-responsive">
+  <table class="table table-sm align-middle">
+    <thead><tr><th>id</th><th>type</th><th>status</th><th>created</th></tr></thead>
+    <tbody>
+      {% for job in recent_jobs %}
+      <tr>
+        <td><a href="/jobs/{{ job.id }}" class="mono">{{ job.id[:8] }}</a></td>
+        <td>{{ job.job_type }}</td>
+        <td><span class="badge text-bg-{{ status_badges.get(job.status, 'secondary') }}">{{ job.status }}</span></td>
+        <td class="small text-secondary">{{ job.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-secondary">No jobs yet — enqueue one from the <a href="/jobs">Jobs</a> page.</p>
+{% endif %}
+{% endblock %}

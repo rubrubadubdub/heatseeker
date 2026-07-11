@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Jobs · Heatseeker{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Jobs</h1>
+  <form method="get" action="/jobs" class="d-flex gap-2">
+    <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">all statuses</option>
+      {% for s in statuses %}
+      <option value="{{ s }}" {{ 'selected' if s == status_filter }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+<div id="jobs-table"
+     hx-get="/jobs/table?status={{ status_filter }}&limit={{ limit }}"
+     hx-trigger="every 3s"
+     hx-swap="innerHTML">
+  {% include "_jobs_table.html" %}
+</div>
+
+<div class="card mt-4">
+  <div class="card-header">Enqueue a job</div>
+  <div class="card-body">
+    <form method="post" action="/jobs/enqueue" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label small">Job type</label>
+        <input name="job_type" class="form-control form-control-sm" value="demo.echo" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small">Payload (JSON object)</label>
+        <input name="payload" class="form-control form-control-sm mono" value='{"hello": "world"}'>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">Priority</label>
+        <select name="priority" class="form-select form-select-sm">
+          {% for value, name in priority_classes.items() %}
+          <option value="{{ value }}" {{ 'selected' if value == 50 }}>{{ value }} — {{ name.lower() }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-primary btn-sm w-100">Enqueue</button>
+      </div>
+    </form>
+    <div class="form-text">Registered handlers run when a worker is active
+      (<code>uv run heatseeker worker</code>).</div>
+  </div>
+</div>
+{% endblock %}

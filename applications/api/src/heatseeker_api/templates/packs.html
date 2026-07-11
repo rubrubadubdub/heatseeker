@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Industry Packs · Heatseeker{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Industry Packs</h1>
+<p class="text-secondary small">Packs define what an industry means: archetypes, services,
+segments, vocabulary, and research sources. Edit the YAML under
+<code>packages/industry_packs/packs/</code>, then reload here.</p>
+
+<div class="table-responsive">
+  <table class="table align-middle">
+    <thead>
+      <tr><th>pack</th><th>name</th><th>version</th><th>validation</th><th>registered</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for p in packs %}
+      <tr>
+        <td><a href="/packs/{{ p.pack_id }}" class="mono">{{ p.pack_id }}</a></td>
+        <td>{{ p.name }}</td>
+        <td class="mono">{{ p.version or '—' }}</td>
+        <td>
+          {% if p.valid %}
+            <span class="badge text-bg-success">valid</span>
+          {% else %}
+            <span class="badge text-bg-danger">{{ p.problems | length }} problem(s)</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if p.registered %}
+            <span class="mono">v{{ p.registered.version }}</span>
+            {% if p.up_to_date %}
+              <span class="badge text-bg-success">up to date</span>
+            {% else %}
+              <span class="badge text-bg-warning">changed on disk</span>
+            {% endif %}
+          {% else %}
+            <span class="text-secondary">not loaded</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if p.valid %}
+          <form method="post" action="/packs/{{ p.pack_id }}/load" class="d-inline">
+            <button class="btn btn-sm {{ 'btn-outline-secondary' if p.up_to_date else 'btn-primary' }}">
+              {{ 'reload' if p.registered else 'load' }}
+            </button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-secondary">No packs discovered.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

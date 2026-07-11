@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Job {{ job.id[:8] }} · Heatseeker{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/jobs">Jobs</a></li>
+    <li class="breadcrumb-item active mono">{{ job.id }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex align-items-center gap-3 mb-3">
+  <h1 class="h4 mb-0">{{ job.job_type }}</h1>
+  <span class="badge text-bg-{{ status_badges.get(job.status, 'secondary') }} fs-6">{{ job.status }}</span>
+  {% if job.status in ('queued', 'running') %}
+  <form method="post" action="/jobs/{{ job.id }}/cancel">
+    <button class="btn btn-outline-warning btn-sm">Cancel</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-5">
+    <table class="table table-sm">
+      <tbody>
+        <tr><th>priority</th><td>{{ priority_classes.get(job.priority, job.priority) }} ({{ job.priority }})</td></tr>
+        <tr><th>attempts</th><td>{{ job.attempts }} / {{ job.max_attempts }}</td></tr>
+        <tr><th>claimed by</th><td class="mono">{{ job.claimed_by or '—' }}</td></tr>
+        <tr><th>correlation</th><td class="mono">{{ job.correlation_id or '—' }}</td></tr>
+        <tr><th>run at</th><td class="small">{{ job.run_at }}</td></tr>
+        <tr><th>created</th><td class="small">{{ job.created_at }}</td></tr>
+        <tr><th>started</th><td class="small">{{ job.started_at or '—' }}</td></tr>
+        <tr><th>finished</th><td class="small">{{ job.finished_at or '—' }}</td></tr>
+        <tr><th>heartbeat</th><td class="small">{{ job.heartbeat_at or '—' }}</td></tr>
+        <tr><th>cancel requested</th><td>{{ job.cancel_requested }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="col-lg-7">
+    <h6>Payload</h6>
+    <pre class="json">{{ job.payload | tojson(indent=2) }}</pre>
+    {% if job.result is not none %}
+    <h6>Result</h6>
+    <pre class="json">{{ job.result | tojson(indent=2) }}</pre>
+    {% endif %}
+    {% if job.error %}
+    <h6>Error</h6>
+    <pre class="json text-danger">{{ job.error }}</pre>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

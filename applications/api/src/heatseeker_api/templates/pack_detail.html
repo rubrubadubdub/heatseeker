@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}{{ pack_id }} · Heatseeker{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/packs">Industry Packs</a></li>
+    <li class="breadcrumb-item active mono">{{ pack_id }}</li>
+  </ol>
+</nav>
+
+{% if problems %}
+<div class="alert alert-danger">
+  <h5 class="alert-heading">Pack is invalid</h5>
+  <ul class="mb-0">
+    {% for problem in problems %}<li class="mono small">{{ problem }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if pack %}
+<div class="d-flex align-items-center gap-3 mb-1">
+  <h1 class="h4 mb-0">{{ manifest.name }}</h1>
+  <span class="badge text-bg-secondary">v{{ manifest.version }}</span>
+  {% if registered %}
+    <span class="badge text-bg-{{ 'success' if registered.content_hash == content_hash else 'warning' }}">
+      {{ 'registered' if registered.content_hash == content_hash else 'registered (older content)' }}
+    </span>
+  {% endif %}
+  <form method="post" action="/packs/{{ pack_id }}/load"><button class="btn btn-sm btn-primary">Load / refresh</button></form>
+</div>
+<p class="text-secondary">{{ manifest.description }}</p>
+<p class="small text-secondary mono">content hash: {{ content_hash[:16] }}...</p>
+
+<ul class="nav nav-tabs" role="tablist">
+  {% set tabs = [
+    ('archetypes', 'Archetypes', archetypes | length),
+    ('services', 'Services', categories | map(attribute='services') | map('length') | sum),
+    ('segments', 'Segments', segments | length),
+    ('systems', 'Systems', systems | length),
+    ('events', 'Event types', event_types | length),
+    ('sources', 'Sources', seed_sources | length),
+    ('terminology', 'Terminology', (terminology.terms | length) if terminology else 0),
+  ] %}
+  {% for tab_id, label, count in tabs %}
+  <li class="nav-item">
+    <button class="nav-link {{ 'active' if loop.first }}" data-bs-toggle="tab"
+            data-bs-target="#tab-{{ tab_id }}" type="button">{{ label }}
+      <span class="badge text-bg-secondary">{{ count }}</span></button>
+  </li>
+  {% endfor %}
+</ul>
+
+<div class="tab-content border border-top-0 rounded-bottom p-3">
+  <div class="tab-pane fade show active" id="tab-archetypes">
+    <div class="row row-cols-2 row-cols-md-3 g-1 small">
+      {% for a in archetypes %}<div class="col">{{ a.name }} <span class="text-secondary mono">{{ a.id }}</span></div>{% endfor %}
+    </div>
+  </div>
+  <div class="tab-pane fade" id="tab-services">
+    {% for cat in categories %}
+    <h6 class="mt-2">{{ cat.name }}</h6>
+    <div class="row row-cols-2 row-cols-md-3 g-1 small">
+      {% for s in cat.services %}<div class="col">{{ s.name }}</div>{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="tab-pane fade" id="tab-segments">
+    <div class="row row-cols-2 row-cols-md-3 g-1 small">
+      {% for s in segments %}<div class="col">{{ s.name }}</div>{% endfor %}
+    </div>
+  </div>
+  <div class="tab-pane fade" id="tab-systems">
+    <div class="row row-cols-2 row-cols-md-3 g-1 small">
+      {% for s in systems %}<div class="col">{{ s.name }}</div>{% endfor %}
+    </div>
+  </div>
+  <div class="tab-pane fade" id="tab-events">
+    <div class="row row-cols-2 row-cols-md-3 g-1 small">
+      {% for e in event_types %}<div class="col">{{ e.name }}</div>{% endfor %}
+    </div>
+  </div>
+  <div class="tab-pane fade" id="tab-sources">
+    {% if discovery %}
+    <div class="mb-2 small">
+      AI expansion:
+      <span class="badge text-bg-{{ 'success' if discovery.ai_expansion_enabled else 'secondary' }}">
+        {{ 'enabled' if discovery.ai_expansion_enabled else 'disabled' }}</span>
+      {% if discovery.proposals_require_approval %}<span class="badge text-bg-info">proposals need approval</span>{% endif %}
+      <span class="text-secondary">targets: {{ discovery.expansion_targets | join(', ') }}</span>
+    </div>
+    {% endif %}
+    <div class="table-responsive">
+      <table class="table table-sm small">
+        <thead><tr><th>name</th><th>category</th><th>tier</th><th>access</th><th>jurisdiction</th><th>terms</th></tr></thead>
+        <tbody>
+          {% for s in seed_sources %}
+          <tr>
+            <td><a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.name }}</a></td>
+            <td>{{ s.category }}</td>
+            <td>{{ s.authority_tier }}</td>
+            <td>{{ s.access }}</td>
+            <td>{{ s.jurisdiction }}</td>
+            <td><span class="badge text-bg-{{ 'success' if s.terms_status == 'approved' else 'secondary' }}">{{ s.terms_status }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="tab-pane fade" id="tab-terminology">
+    {% if terminology %}
+    <div class="row g-1 small">
+      {% for t in terminology.terms %}
+      <div class="col-12"><strong>{{ t.term }}</strong>
+        <span class="text-secondary">{{ t.synonyms | join(' · ') }}</span></div>
+      {% endfor %}
+    </div>
+    {% if terminology.exclusions %}
+    <h6 class="mt-3">Exclusions (false-match guards)</h6>
+    <div class="small text-secondary">{{ terminology.exclusions | join(' · ') }}</div>
+    {% endif %}
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
