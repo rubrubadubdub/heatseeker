@@ -1,0 +1,5 @@
+# Deliberately invalid fixture: bad version, id/directory mismatch (loader must flag both).
+schema: pack_manifest/v1
+id: wrong_id
+name: Broken pack
+version: not-semver

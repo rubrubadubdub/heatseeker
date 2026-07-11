@@ -1,0 +1,6 @@
+schema: company_archetypes/v1
+archetypes:
+  - {id: roaster, name: Coffee roaster}
+  - {id: green_bean_importer, name: Green bean importer}
+  - {id: cafe_chain, name: Cafe chain}
+  - {id: equipment_supplier, name: Roasting equipment supplier}

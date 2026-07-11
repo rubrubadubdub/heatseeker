@@ -1,0 +1,7 @@
+schema: service_taxonomy/v1
+categories:
+  - id: roasting
+    name: Roasting services
+    services:
+      - {id: contract_roasting, name: Contract roasting}
+      - {id: private_label, name: Private-label supply}

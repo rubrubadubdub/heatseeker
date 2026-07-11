@@ -1,0 +1,5 @@
+schema: company_archetypes/v1
+archetypes:
+  - {id: duplicate_one, name: First}
+  - {id: duplicate_one, name: Second with same id}
+  - {id: BadCase, name: Non-snake-case id}

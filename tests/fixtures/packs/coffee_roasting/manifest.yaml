@@ -1,0 +1,7 @@
+# Second-industry fixture: proves the core is industry-agnostic (spec §41.18, §39.11).
+schema: pack_manifest/v1
+id: coffee_roasting
+name: Coffee Roasting & Supply (test fixture)
+version: 0.1.0
+description: Minimal second industry used by tests — never loaded in production.
+spec_compat: phase1/v1
