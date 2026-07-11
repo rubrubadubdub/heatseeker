@@ -10,6 +10,7 @@ import httpx
 import pytest
 from alembic import command
 from fastapi.testclient import TestClient
+from heatseeker_api import ui_sources
 from heatseeker_api.main import create_app
 from heatseeker_common.db import create_db_engine, session_scope
 from heatseeker_common.migrate import build_alembic_config
@@ -737,6 +738,36 @@ def test_source_and_coverage_workflow_via_ui(engine, settings):
         "/sources", params={"industry_id": "scaffolding", "region_code": "AU-QLD"}
     )
     assert "Edited policy bulletin" in filtered.text
+
+
+def test_ui_collect_uses_fresh_transaction_for_enqueue(engine, settings, monkeypatch):
+    """A worker commit between validation and enqueue must not stale the write."""
+    with session_scope(engine) as session:
+        source = _source(name="Concurrent collection source")
+        session.add(source)
+        session.flush()
+        source_id = source.id
+
+    original_enqueue = ui_sources.jobs.enqueue
+
+    def enqueue_after_concurrent_commit(session, *args, **kwargs):
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE source_definition SET updated_at = updated_at WHERE id = :id"),
+                {"id": source_id},
+            )
+        return original_enqueue(session, *args, **kwargs)
+
+    monkeypatch.setattr(ui_sources.jobs, "enqueue", enqueue_after_concurrent_commit)
+    client = TestClient(create_app(settings))
+    response = client.post(f"/sources/{source_id}/collect", follow_redirects=False)
+
+    assert response.status_code == 303
+    with session_scope(engine) as session:
+        from heatseeker_common.models import Job
+
+        queued = session.scalars(select(Job).where(Job.job_type == "sources.collect")).one()
+        assert queued.payload["source_id"] == source_id
 
 
 def test_legacy_0003_database_upgrades_without_losing_ids_or_documents(tmp_path):
