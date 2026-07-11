@@ -95,7 +95,10 @@ def deprecation_reason(source: SourceDefinition) -> str | None:
         and source.quality_score < DEPRECATE_SCORE_BELOW
         and source.fetch_attempts >= DEPRECATE_SCORE_MIN_ATTEMPTS
     ):
-        return f"sustained grade E (score {source.quality_score} over {source.fetch_attempts} attempts)"
+        return (
+            f"sustained grade E (score {source.quality_score} "
+            f"over {source.fetch_attempts} attempts)"
+        )
     return None
 
 

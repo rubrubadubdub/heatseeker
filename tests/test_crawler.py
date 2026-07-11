@@ -82,7 +82,7 @@ def test_budget_and_depth_limits_hold(engine, settings):
     pages = {"/": '<a href="/p1">1</a>'}
     for i in range(1, 50):
         pages[f"/p{i}"] = f'<a href="/p{i + 1}">next</a><p>content {i}</p>'
-    transport, requested = _site(pages)
+    transport, _ = _site(pages)
     with session_scope(engine) as session:
         source_id = _make_source(session)
         summary = crawl_source(
