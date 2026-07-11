@@ -34,12 +34,32 @@
 - Prefer precision over coverage of classification: abstention is a valid, testable
   outcome (spec §37.4).
 
-## Git
+## Git — atomic commits & pushes policy (owner directive 2026-07-11)
 
-- Branch from `main`; small, milestone-scoped commits; imperative-mood messages.
-- Commit body references spec sections/ADRs when the change implements or deviates from
-  them (e.g. `Implements §11.3 robots evaluation; see ADR-0007`).
-- Never commit: `.env`, `data/`, secrets, real crawl output.
+**Atomic commits.** One logical change per commit — one feature, one fix, one doc
+update. Never mix refactors with behaviour changes, or unrelated fixes with features.
+If a change description needs the word "and" between unrelated clauses, split it.
+
+- **Green gate**: `uv run pytest -q && uv run ruff check .` must pass before every
+  commit. No commit with failing tests or lint (no `--no-verify`, ever).
+- **Schema changes travel whole**: a model change + its Alembic migration + its tests
+  land in the same commit — never a migration orphaned from the code that needs it.
+- **Message format**: `type(scope): imperative summary` (≤72 chars).
+  Types: `feat`, `fix`, `docs`, `test`, `chore`, `refactor`, `perf`.
+  Scopes mirror packages/apps: `common`, `core-domain`, `packs`, `sources`, `crawler`,
+  `worker`, `api`, `cli`. Body says *why* and cites spec §/ADR where relevant.
+  AI-authored commits end with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
+- **Docs move with code**: roadmap/status/ADR updates belong in the commit that makes
+  them true (or an immediately following `docs:` commit — never left uncommitted).
+
+**Pushes.** Push to `origin main` after each completed unit of work — at minimum after
+every milestone step and at the end of every working session. Never force-push `main`.
+Tag milestone completions: `git tag -a m<N>-complete` (push with `--follow-tags`).
+
+- Never commit: `.env`, `data/`, secrets, real crawl output, desktop artifacts.
+- History note: commits `c992958..3ed173a` are the initial import of M0–M3, split by
+  area for reviewability; they are not individually buildable. Everything after them
+  follows this policy.
 
 ## Documentation maintenance (the token-economy contract)
 

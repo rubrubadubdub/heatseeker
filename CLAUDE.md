@@ -85,3 +85,7 @@ Ruff · Typer CLI · GUI: server-rendered Jinja2 + Bootstrap 5 + htmx, vendored,
   (`Organisation`, `normalisation`), because the spec's YAML schemas do.
 - After completing work: update the milestone status in `docs/roadmap.md`; record any
   deviation from the spec or an ADR as a new ADR.
+- **Git is mandatory and atomic** (docs/conventions.md#git): one logical change per
+  commit, tests+lint green first, schema+migration+tests together, push to origin
+  after each completed unit; tag milestones `m<N>-complete`. Never leave work
+  uncommitted at end of session.
