@@ -9,6 +9,7 @@ members = [
     "heatseeker-cli",
     "heatseeker-common",
     "heatseeker-core-domain",
+    "heatseeker-entity-resolution",
     "heatseeker-industry-packs",
     "heatseeker-source-registry",
     "heatseeker-worker",
@@ -196,6 +197,7 @@ dependencies = [
     { name = "heatseeker-cli" },
     { name = "heatseeker-common" },
     { name = "heatseeker-core-domain" },
+    { name = "heatseeker-entity-resolution" },
     { name = "heatseeker-industry-packs" },
     { name = "heatseeker-source-registry" },
     { name = "heatseeker-worker" },
@@ -214,6 +216,7 @@ requires-dist = [
     { name = "heatseeker-cli", editable = "applications/cli" },
     { name = "heatseeker-common", editable = "packages/common" },
     { name = "heatseeker-core-domain", editable = "packages/core_domain" },
+    { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },
     { name = "heatseeker-source-registry", editable = "packages/source_registry" },
     { name = "heatseeker-worker", editable = "applications/worker" },
@@ -234,6 +237,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "heatseeker-common" },
     { name = "heatseeker-core-domain" },
+    { name = "heatseeker-entity-resolution" },
     { name = "heatseeker-industry-packs" },
     { name = "heatseeker-source-registry" },
     { name = "jinja2" },
@@ -246,6 +250,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.111" },
     { name = "heatseeker-common", editable = "packages/common" },
     { name = "heatseeker-core-domain", editable = "packages/core_domain" },
+    { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },
     { name = "heatseeker-source-registry", editable = "packages/source_registry" },
     { name = "jinja2", specifier = ">=3.1" },
@@ -307,6 +312,17 @@ dependencies = [
 requires-dist = [{ name = "pydantic", specifier = ">=2.7" }]
 
 [[package]]
+name = "heatseeker-entity-resolution"
+version = "0.1.0"
+source = { editable = "packages/entity_resolution" }
+dependencies = [
+    { name = "heatseeker-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "heatseeker-common", editable = "packages/common" }]
+
+[[package]]
 name = "heatseeker-industry-packs"
 version = "0.1.0"
 source = { editable = "packages/industry_packs" }
@@ -364,6 +380,7 @@ version = "0.1.0"
 source = { editable = "applications/worker" }
 dependencies = [
     { name = "heatseeker-common" },
+    { name = "heatseeker-entity-resolution" },
     { name = "heatseeker-industry-packs" },
     { name = "heatseeker-source-registry" },
 ]
@@ -371,6 +388,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "heatseeker-common", editable = "packages/common" },
+    { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },
     { name = "heatseeker-source-registry", editable = "packages/source_registry" },
 ]

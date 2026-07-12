@@ -2,6 +2,7 @@ from alembic import context
 from heatseeker_common.db import Base
 from heatseeker_common.models import *  # noqa: F403 — register tables on Base.metadata
 from heatseeker_common.settings import Settings
+from heatseeker_entity_resolution.models import *  # noqa: F403 — register entity tables
 from heatseeker_industry_packs.models import *  # noqa: F403 — register pack tables
 from heatseeker_source_registry.models import *  # noqa: F403 — register source tables
 from sqlalchemy import engine_from_config, pool

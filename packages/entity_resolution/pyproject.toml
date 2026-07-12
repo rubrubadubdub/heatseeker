@@ -1,0 +1,18 @@
+[project]
+name = "heatseeker-entity-resolution"
+version = "0.1.0"
+description = "Entity core: organisations, units, locations, identifiers, contacts, match scoring, reversible merge (M4)"
+requires-python = ">=3.12"
+dependencies = [
+    "heatseeker-common",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/heatseeker_entity_resolution"]
+
+[tool.uv.sources]
+heatseeker-common = { workspace = true }
