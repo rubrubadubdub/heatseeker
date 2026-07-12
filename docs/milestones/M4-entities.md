@@ -26,21 +26,30 @@ ambiguous matches reviewable · every merge reversible.
    move** — identifiers, domains, contacts, units stay attached to their original
    organisation. Reads resolve through `canonical_id()` (chain-following, cycle-guarded)
    and `merge_group()` aggregates the combined profile. Split = `reverse_merge`: restore
-   prior status, clear pointer, stamp the audit row `reversed_at`. Nothing is ever
-   deleted or overwritten, so reversal is exact.
+   prior status and candidate workflow snapshot, clear the pointer, and stamp the audit
+   row with time, actor, and reason. Nothing is deleted or moved, so entity state is
+   restored exactly while the immutable merge/reversal audit remains.
 3. **Match scoring is deterministic code** (ADR-0008 boundary): normalised signal
    comparison — shared identifier (scheme+value) → `exact`; shared domain or normalised
    legal-name equality → `high_confidence_probable`; fuzzy name (token overlap +
-   SequenceMatcher) with locality/phone boosts → `possible_review`. Every candidate row
+   SequenceMatcher) with locality/phone boosts → `possible_review`. Exact street address
+   and non-public-provider email domains add corroborating signals. Every candidate row
    stores the per-signal contribution list for explainability (§14.2).
 4. **Nothing auto-merges.** Even exact matches enter `entity_match_candidate` and wait
-   for a human decision (merge / related-but-distinct / confirmed-distinct). Queue sorts
-   by score + conflicting-signal count (§14.5 priority, Phase-1 subset).
-5. **Duplicate scan is blocked, not O(n²)**: candidate pairs come from shared blocking
-   keys (identifier value, domain, normalised-name prefix token). Scan is idempotent —
-   re-running updates scores in place, resolved pairs are not re-opened. Runs inline or
-   as job `entities.match_scan`.
-6. **Deferred from §13 deliberately**: `Person`/`RoleAssignment` (spec M4 list omits
+   for a human decision (merge / related-but-distinct / confirmed-distinct). A prior
+   human decision cannot be bypassed through the direct merge path.
+5. **Duplicate scan is blocked, not O(n²)**: candidate pairs come from shared strong keys
+   (identifier, domain, phone, business-email domain, exact address/name) and every
+   significant name token, so leading words such as “The” do not hide a duplicate.
+   Oversized generic-token blocks are reported and skipped; oversized strong-evidence
+   blocks use deterministic anchor coverage rather than disappearing or exploding
+   quadratically. Scan is idempotent — re-running updates scores in place and resolved
+   pairs are not re-opened. Runs inline or as job `entities.match_scan`.
+6. **Queue priority is explicit** (§14.5): probability, conflicting facts, downstream
+   record impact, ease of resolution, and a reserved commercial-importance input combine
+   into a stored, inspectable priority. M4 computes only dimensions supported by current
+   data; M5 may supply commercial importance without changing queue mechanics.
+7. **Deferred from §13 deliberately**: `Person`/`RoleAssignment` (spec M4 list omits
    them; land with contact intelligence, §20), so `contact_point.person_id` is omitted
    until a `person` table exists. `website_domains`/`registration_identifiers` YAML
    lists become proper child tables (`organisation_domain`, `organisation_identifier`)
@@ -65,10 +74,11 @@ ambiguous matches reviewable · every merge reversible.
   label, public_business_contact, role_based, first_observed_at, last_verified_at,
   deliverability_status, confidence, source_evidence_ids JSON.
 - `entity_match_candidate` — organisation_a/b FKs (a < b, unique pair), match_state
-  (§14.3 vocabulary), score, signals JSON, resolution + resolved_by/at/notes,
-  created/updated_at.
+  (§14.3 vocabulary), score, signals JSON, priority dimensions, resolution +
+  resolved_by/at/notes, created/updated_at.
 - `entity_merge` — survivor/absorbed FKs, candidate FK nullable, rationale,
-  signals_snapshot JSON, absorbed_prior_status, performed_by/at, reversed_at/reason.
+  signals snapshot + prior workflow state, absorbed prior status, performed_by/at,
+  reversed_by/at/reason.
 
 ## Module map
 
@@ -87,6 +97,13 @@ ambiguous matches reviewable · every merge reversible.
 | Acceptance | Test |
 |---|---|
 | duplicates found + safely merged | `test_matching.py` scan states; `test_resolution.py` merge keeps absorbed row + children intact |
-| branch/parent not flattened | units/contacts stay on original org; group_profile lists per-org attribution; parent links never rewritten |
+| branch/parent not flattened | units/contacts stay on original org; cross-org unit contacts rejected; parent ancestry never merged or rewritten |
 | ambiguous matches reviewable | possible_review candidates persist + decisions recorded, audit kept |
-| every merge reversible | reverse_merge restores exact prior state; double-reverse and re-merge guarded |
+| every merge reversible | reverse_merge restores entity + candidate state and records actor/reason; double-reverse and decision bypass guarded |
+
+## Refinement audit (2026-07-12)
+
+Adversarial coverage now includes leading stop words, oversized blocks, corroborating
+email/address signals, transitive parent ancestry, mismatched candidate IDs, attempts to
+bypass a prior human decision, reversal actor/state fidelity, and migration 0013 ↔ 0014
+with populated entity data.

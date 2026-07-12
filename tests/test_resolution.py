@@ -68,6 +68,7 @@ def test_merge_is_exactly_reversible(engine):
         survivor, absorbed = _two_duplicates(session)
         absorbed_id = absorbed.id
         prior_status = absorbed.status
+        survivor_observed_at = survivor.last_observed_at
         merge = perform_merge(
             session, survivor.id, absorbed.id, rationale="same ABN", performed_by="tester"
         )
@@ -83,7 +84,9 @@ def test_merge_is_exactly_reversible(engine):
         assert canonical_id(session, absorbed_id) == absorbed_id
         merge = session.get(EntityMerge, merge_id)
         assert merge.reversed_at is not None
+        assert merge.reversed_by == "tester"
         assert merge.reversal_reason == "wrong pair"
+        assert merge.survivor.last_observed_at == survivor_observed_at
         # Audit row and both organisations still exist — nothing was deleted.
         assert entities.organisation_counts(session)["total"] == 2
 
@@ -103,6 +106,11 @@ def test_merge_guards(engine):
             perform_merge(session, survivor.id, absorbed.id, rationale="  ")
         with pytest.raises(ResolutionError):  # parent/subsidiary never flattened
             perform_merge(session, survivor.id, parent.id, rationale="looks similar")
+
+        grandparent = entities.create_organisation(session, "Global Holdings")
+        parent.parent_organisation_id = grandparent.id
+        with pytest.raises(ResolutionError):  # transitive ancestors are protected too
+            perform_merge(session, survivor.id, grandparent.id, rationale="looks similar")
 
         perform_merge(session, survivor.id, absorbed.id, rationale="same ABN")
         with pytest.raises(ResolutionError):  # already merged
@@ -183,6 +191,8 @@ def test_reversal_reopens_queue_candidate(engine):
         _two_duplicates(session)
         scan_for_duplicates(session)
         candidate = session.execute(select(EntityMatchCandidate)).scalar_one()
+        original_state = candidate.match_state
+        original_notes = candidate.notes
         record_decision(
             session,
             candidate.id,
@@ -200,6 +210,27 @@ def test_reversal_reopens_queue_candidate(engine):
     with session_scope(engine) as session:
         candidate = session.execute(select(EntityMatchCandidate)).scalar_one()
         assert candidate.resolution is None
-        assert candidate.match_state == MatchState.POSSIBLE_REVIEW
-        assert "operator error" in candidate.notes
+        assert candidate.match_state == original_state
+        assert candidate.notes == original_notes
         assert list_queue(session) != []
+
+
+def test_merge_rejects_mismatched_or_decided_candidate(engine):
+    with session_scope(engine) as session:
+        a, b = _two_duplicates(session)
+        c = entities.create_organisation(session, "Other Company")
+        scan_for_duplicates(session)
+        candidate = session.execute(select(EntityMatchCandidate)).scalar_one()
+
+        with pytest.raises(ResolutionError, match="does not describe"):
+            perform_merge(
+                session,
+                a.id,
+                c.id,
+                rationale="wrong queue row",
+                candidate_id=candidate.id,
+            )
+
+        record_decision(session, candidate.id, "distinct", resolved_by="tester")
+        with pytest.raises(ResolutionError, match="human decision"):
+            perform_merge(session, a.id, b.id, rationale="bypass decision")

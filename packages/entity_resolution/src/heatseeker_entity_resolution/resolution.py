@@ -97,6 +97,21 @@ def _candidate_for_pair(
     ).scalar_one_or_none()
 
 
+def _ancestor_ids(session: Session, organisation: Organisation) -> set[str]:
+    """Return every represented parent, tolerating malformed legacy cycles."""
+    ancestors: set[str] = set()
+    pending = [organisation.parent_organisation_id, organisation.ultimate_parent_id]
+    while pending:
+        parent_id = pending.pop()
+        if parent_id is None or parent_id in ancestors:
+            continue
+        ancestors.add(parent_id)
+        parent = session.get(Organisation, parent_id)
+        if parent is not None:
+            pending.extend([parent.parent_organisation_id, parent.ultimate_parent_id])
+    return ancestors
+
+
 def perform_merge(
     session: Session,
     survivor_id: str,
@@ -116,8 +131,8 @@ def perform_merge(
         raise ResolutionError("that record is already merged — reverse the existing merge first")
     if survivor.id == absorbed.id:
         raise ResolutionError("cannot merge an organisation into itself")
-    if absorbed.id in {survivor.parent_organisation_id, survivor.ultimate_parent_id} or (
-        survivor.id in {absorbed.parent_organisation_id, absorbed.ultimate_parent_id}
+    if absorbed.id in _ancestor_ids(session, survivor) or survivor.id in _ancestor_ids(
+        session, absorbed
     ):
         raise ResolutionError(
             "parent and subsidiary are related organisations, not duplicates — "
@@ -127,8 +142,22 @@ def perform_merge(
     candidate = None
     if candidate_id is not None:
         candidate = session.get(EntityMatchCandidate, candidate_id)
-    if candidate is None:
-        candidate = _candidate_for_pair(session, survivor.id, absorbed.id)
+        if candidate is None:
+            raise LookupError(f"match candidate not found: {candidate_id}")
+        candidate_pair = {candidate.organisation_a_id, candidate.organisation_b_id}
+        if candidate_pair != {survivor.id, absorbed.id}:
+            raise ResolutionError("match candidate does not describe the merge pair")
+        if candidate.resolution is not None:
+            raise ResolutionError("match candidate is already resolved")
+    else:
+        possible_candidate = _candidate_for_pair(session, survivor.id, absorbed.id)
+        if possible_candidate is not None:
+            if possible_candidate.resolution is not None:
+                raise ResolutionError(
+                    "match candidate already has a human decision; do not bypass it with "
+                    "a direct merge"
+                )
+            candidate = possible_candidate
 
     merge = EntityMerge(
         survivor_id=survivor.id,
@@ -137,12 +166,17 @@ def perform_merge(
         rationale=rationale.strip(),
         signals_snapshot=list(candidate.signals) if candidate else [],
         absorbed_prior_status=absorbed.status,
+        candidate_prior_match_state=candidate.match_state if candidate else None,
+        candidate_prior_resolution=candidate.resolution if candidate else None,
+        candidate_prior_resolved_by=candidate.resolved_by if candidate else None,
+        candidate_prior_resolved_at=candidate.resolved_at if candidate else None,
+        candidate_prior_notes=candidate.notes if candidate else None,
+        candidate_prior_updated_at=candidate.updated_at if candidate else None,
         performed_by=performed_by,
     )
     session.add(merge)
     absorbed.status = OrganisationStatus.MERGED
     absorbed.merged_into_id = survivor.id
-    survivor.last_observed_at = utc_now()
     if candidate is not None:
         candidate.resolution = CandidateResolution.MERGED
         candidate.resolved_by = performed_by
@@ -172,18 +206,26 @@ def reverse_merge(
     absorbed.merged_into_id = None
     absorbed.status = merge.absorbed_prior_status
     merge.reversed_at = utc_now()
+    merge.reversed_by = performed_by
     merge.reversal_reason = reason.strip()
 
     candidate = (
         session.get(EntityMatchCandidate, merge.candidate_id) if merge.candidate_id else None
     )
     if candidate is not None and candidate.resolution == CandidateResolution.MERGED:
-        candidate.resolution = None
-        candidate.resolved_by = None
-        candidate.resolved_at = None
-        candidate.match_state = MatchState.POSSIBLE_REVIEW
-        candidate.notes = f"reopened by merge reversal: {reason.strip()}"
-        candidate.updated_at = utc_now()
+        if merge.candidate_prior_match_state is not None:
+            candidate.match_state = merge.candidate_prior_match_state
+            candidate.resolution = merge.candidate_prior_resolution
+            candidate.resolved_by = merge.candidate_prior_resolved_by
+            candidate.resolved_at = merge.candidate_prior_resolved_at
+            candidate.notes = merge.candidate_prior_notes
+            candidate.updated_at = merge.candidate_prior_updated_at or utc_now()
+        else:
+            # Backward-compatible reversal for merges created before migration 0014.
+            candidate.resolution = None
+            candidate.resolved_by = None
+            candidate.resolved_at = None
+            candidate.updated_at = utc_now()
     session.flush()
     return merge
 
@@ -193,6 +235,7 @@ def list_queue(
 ) -> list[EntityMatchCandidate]:
     """Review queue, most decision-worthy first (spec §14.5, Phase-1 subset)."""
     stmt = select(EntityMatchCandidate).order_by(
+        EntityMatchCandidate.priority_score.desc(),
         EntityMatchCandidate.score.desc(),
         EntityMatchCandidate.conflict_count.desc(),
         EntityMatchCandidate.created_at,

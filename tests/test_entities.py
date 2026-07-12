@@ -5,6 +5,8 @@ from heatseeker_common.db import session_scope
 from heatseeker_entity_resolution import entities
 from heatseeker_entity_resolution.models import ContactType, LocationType, UnitType
 from heatseeker_entity_resolution.normalise import (
+    blocking_name_tokens,
+    email_domain,
     normalise_domain,
     normalise_identifier,
     normalise_name,
@@ -26,6 +28,9 @@ def test_normalise_domain_and_identifier_and_phone():
     assert normalise_identifier("51 824 753 556") == "51824753556"
     assert phone_match_key("+61 7 3333 1111") == phone_match_key("(07) 3333 1111")
     assert phone_match_key("123") is None
+    assert email_domain("Info@Acme.com.au") == "acme.com.au"
+    assert email_domain("person@gmail.com") is None
+    assert blocking_name_tokens("the acme and sons") == {"acme", "sons"}
 
 
 def test_create_organisation_with_children_and_completeness(engine):
@@ -73,6 +78,29 @@ def test_blank_names_and_values_rejected(engine):
         org = entities.create_organisation(session, "Real Co")
         with pytest.raises(ValueError):
             entities.add_domain(session, org, "   ")
+
+
+def test_contact_operational_unit_must_belong_to_same_organisation(engine):
+    with session_scope(engine) as session:
+        a = entities.create_organisation(session, "Acme Scaffolding")
+        b = entities.create_organisation(session, "Brisbane Formwork")
+        unit = entities.add_unit(session, b, name="South yard")
+        with pytest.raises(ValueError, match="same organisation"):
+            entities.add_contact_point(
+                session,
+                a,
+                ContactType.PHONE,
+                "07 3000 0000",
+                operational_unit_id=unit.id,
+            )
+        with pytest.raises(ValueError, match="not found"):
+            entities.add_contact_point(
+                session,
+                a,
+                ContactType.PHONE,
+                "07 3000 0000",
+                operational_unit_id="missing",
+            )
 
 
 def test_list_organisations_searches_names_identifiers_domains(engine):

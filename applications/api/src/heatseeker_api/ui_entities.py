@@ -99,10 +99,17 @@ def run_match_scan(request: Request):
     engine = request.app.state.engine
     with session_scope(engine) as session:
         summary = scan_for_duplicates(session)
+    block_note = ""
+    if summary["oversized_blocks_skipped"]:
+        block_note = (
+            f"; {summary['oversized_blocks_skipped']} oversized generic-name blocks "
+            "safely skipped"
+        )
     return _redirect(
         "/resolution",
         f"Scan finished: {summary['pairs_scored']} pairs scored, "
-        f"{summary['candidates_created']} new, {summary['candidates_updated']} refreshed",
+        f"{summary['candidates_created']} new, {summary['candidates_updated']} refreshed"
+        f"{block_note}",
     )
 
 

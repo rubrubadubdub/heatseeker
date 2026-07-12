@@ -50,6 +50,10 @@ def _candidate_summary(candidate: EntityMatchCandidate) -> dict:
         "organisation_b_id": candidate.organisation_b_id,
         "match_state": candidate.match_state,
         "score": candidate.score,
+        "priority_score": candidate.priority_score,
+        "commercial_importance": candidate.commercial_importance,
+        "downstream_impact": candidate.downstream_impact,
+        "ease_of_resolution": candidate.ease_of_resolution,
         "signals": candidate.signals,
         "conflict_count": candidate.conflict_count,
         "resolution": candidate.resolution,
@@ -183,7 +187,11 @@ def api_reverse_merge(request: Request, merge_id: str, payload: ReverseRequest):
             merge = reverse_merge(
                 session, merge_id, reason=payload.reason, performed_by="api"
             )
-            return {"merge_id": merge.id, "reversed_at": merge.reversed_at.isoformat()}
+            return {
+                "merge_id": merge.id,
+                "reversed_at": merge.reversed_at.isoformat(),
+                "reversed_by": merge.reversed_by,
+            }
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ResolutionError as exc:

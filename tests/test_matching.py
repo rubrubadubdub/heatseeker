@@ -10,6 +10,7 @@ from heatseeker_entity_resolution.matching import (
 from heatseeker_entity_resolution.models import (
     ContactType,
     EntityMatchCandidate,
+    LocationType,
     MatchState,
 )
 from sqlalchemy import select
@@ -87,6 +88,60 @@ def test_shared_phone_boosts_fuzzy_name(engine):
         assert state == MatchState.POSSIBLE_REVIEW
         assert any(s["signal"] == "shared_phone" for s in signals)
         assert score > 0.5
+
+
+def test_business_email_domain_and_exact_address_are_match_signals(engine):
+    with session_scope(engine) as session:
+        org_a = entities.create_organisation(session, "Alpha Access")
+        org_b = entities.create_organisation(session, "Completely Different Trading Name")
+        entities.add_contact_point(
+            session, org_a, ContactType.GENERAL_EMAIL, "info@shared-business.com.au"
+        )
+        entities.add_contact_point(
+            session, org_b, ContactType.ROLE_EMAIL, "sales@shared-business.com.au"
+        )
+        for org in (org_a, org_b):
+            location = entities.add_location(
+                session,
+                address_lines=["12 Industry Road"],
+                locality="Brisbane",
+                postal_code="4000",
+                country="AU",
+                location_type=LocationType.OFFICE,
+            )
+            entities.set_primary_location(session, org, location)
+
+        state, score, signals, _ = score_pair(build_features(org_a), build_features(org_b))
+        assert state == MatchState.HIGH_CONFIDENCE_PROBABLE
+        assert score >= 0.85
+        assert {signal["signal"] for signal in signals} >= {
+            "shared_email_domain",
+            "shared_address",
+        }
+
+
+def test_scan_compares_names_with_leading_stop_word(engine):
+    with session_scope(engine) as session:
+        entities.create_organisation(session, "The Acme Scaffolding")
+        entities.create_organisation(session, "Acme Scaffolding")
+        summary = scan_for_duplicates(session)
+        candidate = session.execute(select(EntityMatchCandidate)).scalar_one()
+        assert summary["candidates_created"] == 1
+        assert candidate.match_state == MatchState.POSSIBLE_REVIEW
+
+
+def test_oversized_strong_block_is_limited_not_discarded(engine):
+    with session_scope(engine) as session:
+        for _ in range(51):
+            entities.create_organisation(session, "Repeated Exact Name Pty Ltd")
+        summary = scan_for_duplicates(session)
+        candidates = list(session.execute(select(EntityMatchCandidate)).scalars())
+
+        assert summary["oversized_blocks_limited"] == 1
+        assert summary["oversized_blocks_skipped"] >= 1
+        assert summary["pairs_scored"] == 50
+        assert len(candidates) == 50
+        assert all(candidate.priority_score > 0 for candidate in candidates)
 
 
 def test_scan_creates_queue_rows_and_is_idempotent(engine):

@@ -32,6 +32,8 @@ def test_entity_crud_scan_decide_reverse_roundtrip(engine, settings):
     queue = client.get("/api/resolution/queue").json()["candidates"]
     assert len(queue) == 1
     assert queue[0]["match_state"] == "exact"
+    assert queue[0]["priority_score"] > 0
+    assert queue[0]["ease_of_resolution"] == 1.0
     assert any(s["signal"] == "shared_identifier" for s in queue[0]["signals"])
 
     decided = client.post(
@@ -67,6 +69,7 @@ def test_entity_crud_scan_decide_reverse_roundtrip(engine, settings):
         merge_id = session.execute(select(EntityMerge.id)).scalar_one()
     reversed_merge = client.post(f"/api/merges/{merge_id}/reverse", json={"reason": "oops"})
     assert reversed_merge.status_code == 200
+    assert reversed_merge.json()["reversed_by"] == "api"
     assert len(client.get("/api/entities").json()["organisations"]) == 2
     # Reversal reopens the candidate for review.
     assert len(client.get("/api/resolution/queue").json()["candidates"]) == 1

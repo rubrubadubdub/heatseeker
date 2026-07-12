@@ -18,7 +18,7 @@
 </p>
 
 <table class="table table-sm align-middle">
-  <thead><tr><th>pair</th><th>state</th><th>score</th><th>signals</th><th style="min-width: 16rem">decision</th></tr></thead>
+  <thead><tr><th>pair</th><th>state</th><th>priority</th><th>match</th><th>signals</th><th style="min-width: 16rem">decision</th></tr></thead>
   <tbody>
   {% for row in rows %}
     {% set candidate = row.candidate %}
@@ -34,6 +34,7 @@
         <span class="badge text-bg-danger" title="conflicting signals">{{ candidate.conflict_count }} conflict{{ 's' if candidate.conflict_count != 1 }}</span>
         {% endif %}
       </td>
+      <td class="mono" title="downstream {{ '%.2f' % candidate.downstream_impact }} · ease {{ '%.2f' % candidate.ease_of_resolution }}">{{ '%.2f' % candidate.priority_score }}</td>
       <td class="mono">{{ '%.2f' % candidate.score }}</td>
       <td class="small">
         {% for signal in candidate.signals %}
@@ -71,7 +72,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="5" class="small text-secondary">
+    <tr><td colspan="6" class="small text-secondary">
       Queue is empty. Run a scan to look for duplicates among current organisations.
     </td></tr>
   {% endfor %}

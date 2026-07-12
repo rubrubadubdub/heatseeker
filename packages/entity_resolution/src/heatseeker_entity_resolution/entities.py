@@ -152,6 +152,14 @@ def add_contact_point(
     value = value.strip()
     if not value:
         raise ValueError("contact value must not be blank")
+    if operational_unit_id is not None:
+        operational_unit = session.get(OperationalUnit, operational_unit_id)
+        if operational_unit is None:
+            raise ValueError(f"operational unit not found: {operational_unit_id}")
+        if operational_unit.organisation_id != organisation.id:
+            raise ValueError(
+                "contact point and operational unit must belong to the same organisation"
+            )
     contact = ContactPoint(
         operational_unit_id=operational_unit_id,
         contact_type=contact_type,

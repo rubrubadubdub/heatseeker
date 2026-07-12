@@ -19,7 +19,7 @@ detail: read the spec section for the milestone via
 | M3 | Responsible crawler | **Done** (2026-07-11, acceptance verified) | [M3-crawler.md](milestones/M3-crawler.md) | Incl. transitive backlink discovery (vocabulary-gated proposals) |
 | — | Document & evidence processing pipeline (PDF/OOXML/image extraction, HTML reference + publication-date extraction, manual evidence) | **Done** (2026-07-12) | see M2/M3 briefs | Migration 0011; versioned runs per (pipeline_version, config_hash); OCR/vision toggles exist but stay off until a provider lands (see gaps) |
 | — | Agentic Source Scout (Codex/Claude plans, scope, budgets, schedules, proposals, optional policy-cleared auto-crawl) | **Done** (2026-07-12; ADR-0014) | — | Early M11 vertical slice; migration 0013 |
-| M4 | Entity core & resolution | **Done** (2026-07-12, acceptance verified) | [M4-entities.md](milestones/M4-entities.md) | Merges are pointers + audit rows (reversible, originals intact); nothing auto-merges; Person/RoleAssignment deferred to contact intelligence (§20) |
+| M4 | Entity core & resolution | **Done** (2026-07-12; adversarially refined same day) | [M4-entities.md](milestones/M4-entities.md) | Multi-key blocking; priority dimensions; exact pointer/candidate reversal audit; ancestry + decision-bypass guards; nothing auto-merges |
 | M5 | Company discovery & profile | Not started | — | |
 | M6 | Projects, relationships, graph | Not started | — | |
 | M7 | News, events, macro signals | Not started | — | |

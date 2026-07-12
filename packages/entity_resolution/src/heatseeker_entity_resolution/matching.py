@@ -19,7 +19,14 @@ from heatseeker_entity_resolution.models import (
     Organisation,
     OrganisationStatus,
 )
-from heatseeker_entity_resolution.normalise import name_tokens, normalise_name, phone_match_key
+from heatseeker_entity_resolution.normalise import (
+    blocking_name_tokens,
+    email_domain,
+    name_tokens,
+    normalise_address,
+    normalise_name,
+    phone_match_key,
+)
 
 # Weights: a shared registered identifier is decisive; domains and exact legal names are
 # strong; fuzzy names alone can only ever reach the review queue.
@@ -29,6 +36,8 @@ _W_NAME_EXACT = 0.85
 _W_NAME_FUZZY_MAX = 0.6
 _W_PHONE = 0.15
 _W_LOCALITY = 0.05
+_W_EMAIL_DOMAIN = 0.55
+_W_ADDRESS = 0.65
 _CONFLICT_PENALTY = 0.3
 
 _FUZZY_RATIO_FLOOR = 0.75
@@ -38,7 +47,7 @@ EXACT_THRESHOLD = 0.98
 HIGH_THRESHOLD = 0.85
 REVIEW_THRESHOLD = 0.45
 
-_MAX_BLOCK_SIZE = 50  # guard against degenerate blocks ("scaffolding" as a name token)
+_MAX_WEAK_BLOCK_SIZE = 50  # guard against generic tokens (for example "scaffolding")
 
 
 @dataclass
@@ -50,6 +59,8 @@ class OrgFeatures:
     identifier_schemes: dict[str, set[str]] = field(default_factory=dict)
     domains: set[str] = field(default_factory=set)
     phone_keys: set[str] = field(default_factory=set)
+    email_domain_keys: set[str] = field(default_factory=set)
+    address_keys: set[str] = field(default_factory=set)
     locality_keys: set[str] = field(default_factory=set)
 
 
@@ -76,12 +87,30 @@ def build_features(organisation: Organisation) -> OrgFeatures:
             key = phone_match_key(contact.value)
             if key:
                 features.phone_keys.add(key)
+        elif contact.contact_type in {ContactType.GENERAL_EMAIL, ContactType.ROLE_EMAIL}:
+            domain = email_domain(contact.value)
+            if domain:
+                features.email_domain_keys.add(domain)
     location = organisation.primary_location
-    if location is not None and location.locality:
-        key = location.locality.casefold().strip()
-        if location.postal_code:
-            key = f"{key}|{location.postal_code.strip()}"
-        features.locality_keys.add(key)
+    if location is not None:
+        if location.locality:
+            key = location.locality.casefold().strip()
+            if location.postal_code:
+                key = f"{key}|{location.postal_code.strip()}"
+            features.locality_keys.add(key)
+        address_parts = list(location.address_lines or [])
+        if address_parts and location.postal_code:
+            address_parts.append(location.postal_code)
+        address = normalise_address(
+            [
+                *address_parts,
+                location.locality,
+                location.region,
+                location.country,
+            ]
+        ) if address_parts else None
+        if address:
+            features.address_keys.add(address)
     return features
 
 
@@ -99,8 +128,10 @@ def _name_similarity(a: OrgFeatures, b: OrgFeatures) -> tuple[float, str]:
             union = tokens_a | tokens_b
             jaccard = len(tokens_a & tokens_b) / len(union) if union else 0.0
             ratio = SequenceMatcher(None, name_a, name_b).ratio()
-            score = max(ratio if ratio >= _FUZZY_RATIO_FLOOR else 0.0,
-                        jaccard if jaccard >= _TOKEN_JACCARD_FLOOR else 0.0)
+            score = max(
+                ratio if ratio >= _FUZZY_RATIO_FLOOR else 0.0,
+                jaccard if jaccard >= _TOKEN_JACCARD_FLOOR else 0.0,
+            )
             if score > best:
                 best, note = score, f"{name_a} ~ {name_b}"
     return best, note
@@ -161,6 +192,24 @@ def score_pair(a: OrgFeatures, b: OrgFeatures) -> tuple[str, float, list[dict], 
                 "weight": _W_PHONE,
             }
         )
+    if a.email_domain_keys & b.email_domain_keys:
+        contributions.append(_W_EMAIL_DOMAIN)
+        signals.append(
+            {
+                "signal": "shared_email_domain",
+                "detail": sorted(a.email_domain_keys & b.email_domain_keys),
+                "weight": _W_EMAIL_DOMAIN,
+            }
+        )
+    if a.address_keys & b.address_keys:
+        contributions.append(_W_ADDRESS)
+        signals.append(
+            {
+                "signal": "shared_address",
+                "detail": sorted(a.address_keys & b.address_keys),
+                "weight": _W_ADDRESS,
+            }
+        )
     if a.locality_keys & b.locality_keys:
         contributions.append(_W_LOCALITY)
         signals.append(
@@ -195,11 +244,59 @@ def _blocking_keys(features: OrgFeatures) -> set[str]:
     keys = {f"id:{scheme}:{value}" for scheme, value in features.identifier_keys}
     keys.update(f"dom:{domain}" for domain in features.domains)
     keys.update(f"phone:{key}" for key in features.phone_keys)
+    keys.update(f"email:{domain}" for domain in features.email_domain_keys)
+    keys.update(f"address:{address}" for address in features.address_keys)
     for name in {features.name_norm, *features.alt_name_norms}:
-        tokens = name.split()
-        if tokens:
-            keys.add(f"name:{tokens[0]}")
+        if name:
+            keys.add(f"name-exact:{name}")
+        keys.update(f"name-token:{token}" for token in blocking_name_tokens(name))
     return keys
+
+
+def _priority_dimensions(
+    a: Organisation,
+    b: Organisation,
+    *,
+    score: float,
+    conflicts: int,
+    signals: list[dict],
+    commercial_importance: float = 0.0,
+) -> tuple[float, float, float]:
+    """Return downstream impact, ease of resolution, and combined queue priority.
+
+    Commercial importance is an explicit input reserved for M5 data. We do not infer it
+    from profile completeness, because that would turn missing data into a negative fact.
+    """
+    commercial_importance = max(0.0, min(1.0, commercial_importance))
+    attached_rows = sum(
+        len(collection)
+        for organisation in (a, b)
+        for collection in (
+            organisation.identifiers,
+            organisation.domains,
+            organisation.contact_points,
+            organisation.units,
+        )
+    )
+    downstream_impact = round(min(1.0, attached_rows / 10.0), 3)
+    signal_names = {signal["signal"] for signal in signals}
+    if "shared_identifier" in signal_names:
+        ease = 1.0
+    elif signal_names & {"shared_domain", "name_exact", "shared_address"}:
+        ease = 0.8
+    else:
+        ease = max(0.1, score - (0.15 * conflicts))
+    ease_of_resolution = round(min(1.0, ease), 3)
+    conflict_priority = min(1.0, conflicts / 3.0)
+    priority = round(
+        (score * 0.55)
+        + (commercial_importance * 0.1)
+        + (downstream_impact * 0.15)
+        + (conflict_priority * 0.1)
+        + (ease_of_resolution * 0.1),
+        3,
+    )
+    return downstream_impact, ease_of_resolution, priority
 
 
 def scan_for_duplicates(session: Session, *, min_score: float = REVIEW_THRESHOLD) -> dict:
@@ -216,6 +313,7 @@ def scan_for_duplicates(session: Session, *, min_score: float = REVIEW_THRESHOLD
                 selectinload(Organisation.identifiers),
                 selectinload(Organisation.domains),
                 selectinload(Organisation.contact_points),
+                selectinload(Organisation.units),
             )
         )
         .scalars()
@@ -223,6 +321,7 @@ def scan_for_duplicates(session: Session, *, min_score: float = REVIEW_THRESHOLD
         .all()
     )
     features_by_id = {org.id: build_features(org) for org in organisations}
+    organisations_by_id = {org.id: org for org in organisations}
 
     blocks: dict[str, list[str]] = {}
     for org_id, features in features_by_id.items():
@@ -230,12 +329,20 @@ def scan_for_duplicates(session: Session, *, min_score: float = REVIEW_THRESHOLD
             blocks.setdefault(key, []).append(org_id)
 
     pairs: set[tuple[str, str]] = set()
-    oversized_blocks = 0
-    for members in blocks.values():
+    oversized_blocks_skipped = oversized_blocks_limited = 0
+    for key, members in blocks.items():
         if len(members) < 2:
             continue
-        if len(members) > _MAX_BLOCK_SIZE:
-            oversized_blocks += 1
+        if len(members) > _MAX_WEAK_BLOCK_SIZE:
+            if key.startswith("name-token:"):
+                oversized_blocks_skipped += 1
+                continue
+            # Strong evidence blocks (same identifier/domain/phone/address/exact name)
+            # still need coverage. A deterministic star compares every member with an
+            # anchor without allowing a corrupt block to create O(n^2) pairs.
+            oversized_blocks_limited += 1
+            ordered = sorted(members)
+            pairs.update((ordered[0], member) for member in ordered[1:])
             continue
         for a, b in combinations(sorted(members), 2):
             pairs.add((a, b))
@@ -251,6 +358,15 @@ def scan_for_duplicates(session: Session, *, min_score: float = REVIEW_THRESHOLD
         if score < min_score:
             continue
         row = existing.get((a_id, b_id))
+        commercial_importance = row.commercial_importance if row is not None else 0.0
+        downstream_impact, ease_of_resolution, priority_score = _priority_dimensions(
+            organisations_by_id[a_id],
+            organisations_by_id[b_id],
+            score=score,
+            conflicts=conflicts,
+            signals=signals,
+            commercial_importance=commercial_importance,
+        )
         if row is None:
             session.add(
                 EntityMatchCandidate(
@@ -260,6 +376,9 @@ def scan_for_duplicates(session: Session, *, min_score: float = REVIEW_THRESHOLD
                     score=score,
                     signals=signals,
                     conflict_count=conflicts,
+                    downstream_impact=downstream_impact,
+                    ease_of_resolution=ease_of_resolution,
+                    priority_score=priority_score,
                 )
             )
             created += 1
@@ -268,6 +387,9 @@ def scan_for_duplicates(session: Session, *, min_score: float = REVIEW_THRESHOLD
             row.score = score
             row.signals = signals
             row.conflict_count = conflicts
+            row.downstream_impact = downstream_impact
+            row.ease_of_resolution = ease_of_resolution
+            row.priority_score = priority_score
             row.updated_at = utc_now()
             updated += 1
     session.flush()
@@ -276,5 +398,6 @@ def scan_for_duplicates(session: Session, *, min_score: float = REVIEW_THRESHOLD
         "pairs_scored": len(pairs),
         "candidates_created": created,
         "candidates_updated": updated,
-        "oversized_blocks_skipped": oversized_blocks,
+        "oversized_blocks_skipped": oversized_blocks_skipped,
+        "oversized_blocks_limited": oversized_blocks_limited,
     }

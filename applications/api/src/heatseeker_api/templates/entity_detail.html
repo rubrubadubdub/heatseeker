@@ -134,7 +134,7 @@
           {{ merge.rationale }}
           {% if merge.reversed_at %}
           <div class="text-warning">reversed {{ merge.reversed_at.strftime('%Y-%m-%d %H:%M') }}:
-            {{ merge.reversal_reason }}</div>
+            {{ merge.reversal_reason }}{% if merge.reversed_by %} by {{ merge.reversed_by }}{% endif %}</div>
           {% else %}
           <form method="post" action="/merges/{{ merge.id }}/reverse" class="d-flex gap-1 mt-1">
             <input name="reason" class="form-control form-control-sm" placeholder="Reason" required>

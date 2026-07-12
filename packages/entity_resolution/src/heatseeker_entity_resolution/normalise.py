@@ -27,6 +27,17 @@ _LEGAL_SUFFIXES = {
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _DIGITS = re.compile(r"\d")
+_BLOCKING_STOP_WORDS = {"a", "an", "and", "for", "of", "the"}
+_PUBLIC_EMAIL_DOMAINS = {
+    "gmail.com",
+    "hotmail.com",
+    "icloud.com",
+    "live.com",
+    "outlook.com",
+    "proton.me",
+    "protonmail.com",
+    "yahoo.com",
+}
 
 
 def normalise_name(name: str) -> str:
@@ -43,6 +54,15 @@ def name_tokens(normalised_name: str) -> set[str]:
     return set(normalised_name.split())
 
 
+def blocking_name_tokens(normalised_name: str) -> set[str]:
+    """Useful name tokens for candidate generation, without generic join words."""
+    return {
+        token
+        for token in normalised_name.split()
+        if token not in _BLOCKING_STOP_WORDS and len(token) >= 2
+    }
+
+
 def normalise_domain(value: str) -> str:
     """Bare lowercase host: scheme, path, port, and leading www. removed."""
     candidate = value.strip().casefold()
@@ -50,6 +70,21 @@ def normalise_domain(value: str) -> str:
         candidate = f"//{candidate}"
     host = urlsplit(candidate).hostname or ""
     return host.removeprefix("www.")
+
+
+def email_domain(value: str) -> str | None:
+    """Normalised domain from a syntactically plausible email address."""
+    _local, separator, domain = value.strip().casefold().rpartition("@")
+    host = normalise_domain(domain) if separator else ""
+    return host if host and host not in _PUBLIC_EMAIL_DOMAINS else None
+
+
+def normalise_address(parts: list[str | None]) -> str | None:
+    """Conservative exact-address key; locality alone is intentionally insufficient."""
+    populated = [part.strip() for part in parts if part and part.strip()]
+    if len(populated) < 2:
+        return None
+    return normalise_name(" ".join(populated)) or None
 
 
 def phone_match_key(value: str) -> str | None:

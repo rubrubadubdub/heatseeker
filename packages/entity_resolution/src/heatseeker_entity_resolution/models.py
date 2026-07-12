@@ -280,6 +280,10 @@ class EntityMatchCandidate(Base):
     score: Mapped[float] = mapped_column(Float, default=0.0)
     signals: Mapped[list] = mapped_column(JSON, default=list)  # explainability (spec §14.2)
     conflict_count: Mapped[int] = mapped_column(default=0)
+    commercial_importance: Mapped[float] = mapped_column(Float, default=0.0)
+    downstream_impact: Mapped[float] = mapped_column(Float, default=0.0)
+    ease_of_resolution: Mapped[float] = mapped_column(Float, default=0.0)
+    priority_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
     resolution: Mapped[str | None] = mapped_column(String(20), nullable=True)
     resolved_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
@@ -306,9 +310,20 @@ class EntityMerge(Base):
     rationale: Mapped[str] = mapped_column(Text)
     signals_snapshot: Mapped[list] = mapped_column(JSON, default=list)
     absorbed_prior_status: Mapped[str] = mapped_column(String(20))
+    candidate_prior_match_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    candidate_prior_resolution: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    candidate_prior_resolved_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    candidate_prior_resolved_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), nullable=True
+    )
+    candidate_prior_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    candidate_prior_updated_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), nullable=True
+    )
     performed_by: Mapped[str] = mapped_column(String(100), default="user")
     performed_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
     reversed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    reversed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     reversal_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     survivor: Mapped[Organisation] = relationship(foreign_keys=[survivor_id])
