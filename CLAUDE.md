@@ -22,8 +22,11 @@ grading/auto-deprecation, autopilot, distillation token pipes (ADR-0011), and a
 extraction of PDF/DOCX/PPTX/XLSX/ODS/image evidence (`document_processing.py`,
 `document_pipeline.py`), HTML reference provenance (`references.py`), claimed
 publication dates (`publication.py`), manual evidence, crawl document budgets; OCR/vision
-toggles default off until a provider lands. 178 tests green. M4 (entity core &
-resolution) next — turns evidence into companies.
+toggles default off until a provider lands. **M4 entity core & resolution is done**
+(`heatseeker_entity_resolution`, migration 0012): organisation/unit/location/identifier/
+domain/contact models, deterministic match scoring into a human-decided resolution queue
+(nothing auto-merges), pointer-based reversible merges, `/entities` + `/resolution` UI.
+201 tests green. M5 (company discovery & profile) next — needs M1+M4.
 Check [docs/roadmap.md](docs/roadmap.md) for milestone status before starting any work.
 Dev loop: `uv sync` · `uv run pytest -q` · `uv run ruff check .` · `uv run heatseeker run`
 User launch path: `Heatseeker.bat` (repo root) / desktop shortcut → `heatseeker run`
