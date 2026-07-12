@@ -26,7 +26,10 @@ toggles default off until a provider lands. **M4 entity core & resolution is don
 (`heatseeker_entity_resolution`, migration 0012): organisation/unit/location/identifier/
 domain/contact models, deterministic match scoring into a human-decided resolution queue
 (nothing auto-merges), pointer-based reversible merges, `/entities` + `/resolution` UI.
-201 tests green. M5 (company discovery & profile) next — needs M1+M4.
+The first M11 vertical slice is also live: **Source Scout** at `/source-scout` persists
+bounded Codex/Claude plans, scope snapshots, schedules, AI audit, proposals, and optional
+policy-cleared auto-crawl (ADR-0014, migration 0013). Provider credentials stay external.
+210 tests green. M5 (company discovery & profile) next — needs M1+M4.
 Check [docs/roadmap.md](docs/roadmap.md) for milestone status before starting any work.
 Dev loop: `uv sync` · `uv run pytest -q` · `uv run ruff check .` · `uv run heatseeker run`
 User launch path: `Heatseeker.bat` (repo root) / desktop shortcut → `heatseeker run`

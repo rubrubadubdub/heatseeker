@@ -26,6 +26,11 @@ uv run heatseeker sources --help
 uv run pytest -q            # test suite
 ```
 
+The browser GUI includes **Source Scout** at `/source-scout`: create bounded Codex or
+Claude source-discovery plans, select a research scope/model, set search parameters and
+budgets, schedule runs, and review proposals or explicitly enable policy-cleared
+auto-collection. Provider credentials remain in the provider CLI's credential store.
+
 Requires [uv](https://docs.astral.sh/uv/) — it provisions Python and dependencies
 automatically on first run.
 

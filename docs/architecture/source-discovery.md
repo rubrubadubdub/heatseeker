@@ -111,11 +111,14 @@ AI proposes *where else to look*, using pack vocabulary and accumulated evidence
 
 **Guardrails (non-negotiable):**
 
-1. AI proposals create `proposed` registry entries only — never a crawl.
-2. Robots + terms policy check runs before any candidate is activatable; sites that
-   prohibit automated access get `manual_only` workflows (spec §11.4).
-3. Human approval required for activation of AI-proposed sources (relaxable later via
-   config once calibrated — spec §35 M12).
+1. AI output creates `proposed` registry entries only. Any later crawl is a separate,
+   deterministic HeatSeeker transition under the plan's activation mode.
+2. Robots is checked before unattended activation, and a recorded terms prohibition is
+   always a blocker; sites known to prohibit automated access use `manual_only`
+   workflows (spec §11.4). AI never marks terms as approved.
+3. Human approval is the default for AI-proposed sources. An explicitly configured
+   unattended research plan may activate policy-cleared proposals under ADR-0014; the
+   choice, scope snapshot, and resulting crawl remain audited.
 4. AI proposals carry reasoning + evidence references and land in the audit trail
    (spec §26.3).
 5. Weak-signal defaults: authority tier 6–7, hypothesis-only fact policy.
@@ -130,5 +133,5 @@ AI proposes *where else to look*, using pack vocabulary and accumulated evidence
 | Seed-list loader (pack → registry sync) | `packages/industry_packs` + `source_registry` | M2 |
 | Policy checker (robots fetch, terms status gate) | `packages/source_registry` | M2–M3 |
 | Deterministic expansion rules | `packages/crawler` (frontier), `source_registry` | M3–M5 |
-| `source.propose_expansion` AI task | `packages/ai` (task interface per ADR-0006) | M11 |
+| `source.propose_expansion` AI task + Source Scout UI | `packages/ai` + API/worker (ADR-0014) | early M11 slice |
 | Review queue for proposed sources | research queues (spec §28.8) | M5 |

@@ -29,3 +29,4 @@ judgement but requires meaningful deviations to be documented — this is where.
 | [0010](0010-contextual-source-coverage.md) | Contextual source coverage profiles | Accepted |
 | [0012](0012-geography-regions-as-data.md) | Named geography regions as data; scope exclusions | Accepted |
 | [0013](0013-configurable-robots-enforcement-and-proxy.md) | Configurable robots enforcement (default enforce) | Accepted |
+| [0014](0014-agentic-source-scout.md) | Bounded agentic Source Scout with explicit unattended mode | Accepted |
