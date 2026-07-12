@@ -30,22 +30,10 @@ def test_api_binds_localhost_by_default(tmp_path):
     assert Settings(data_dir=tmp_path, _env_file=None).api_host == "127.0.0.1"
 
 
-def test_robots_defaults_to_advisory_and_validates(tmp_path):
-    assert Settings(data_dir=tmp_path, _env_file=None).robots_policy == "ignore"
-    assert Settings(data_dir=tmp_path, robots_policy=" ENFORCE ", _env_file=None).robots_policy == (
-        "enforce"
+def test_robots_defaults_to_enforce_and_validates(tmp_path):
+    assert Settings(data_dir=tmp_path, _env_file=None).robots_policy == "enforce"
+    assert Settings(data_dir=tmp_path, robots_policy=" IGNORE ", _env_file=None).robots_policy == (
+        "ignore"
     )
     with pytest.raises(ValueError, match="robots_policy"):
         Settings(data_dir=tmp_path, robots_policy="sometimes", _env_file=None)
-
-
-def test_fetch_proxy_url_is_normalised_and_validated(tmp_path):
-    settings = Settings(
-        data_dir=tmp_path,
-        fetch_proxy_url="  socks5://localhost:1080  ",
-        _env_file=None,
-    )
-    assert settings.fetch_proxy_url == "socks5://localhost:1080"
-    assert Settings(data_dir=tmp_path, fetch_proxy_url="  ", _env_file=None).fetch_proxy_url is None
-    with pytest.raises(ValueError, match="fetch_proxy_url"):
-        Settings(data_dir=tmp_path, fetch_proxy_url="localhost:8080", _env_file=None)

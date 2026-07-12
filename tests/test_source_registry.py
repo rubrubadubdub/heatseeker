@@ -53,9 +53,8 @@ def _transport(handler) -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
-def test_proxy_helper_routes_real_fetches_but_test_transport_wins(settings):
-    settings.fetch_proxy_url = "http://proxy.example:8080"
-    assert http_client_kwargs(settings, None) == {"proxy": "http://proxy.example:8080"}
+def test_http_client_kwargs_prefers_injected_transport(settings):
+    assert http_client_kwargs(settings, None) == {}
     transport = _transport(lambda _request: httpx.Response(200))
     assert http_client_kwargs(settings, transport) == {"transport": transport}
 
@@ -161,6 +160,7 @@ def test_collect_blocked_when_policy_regresses(engine, settings):
 
 
 def test_collect_ignore_mode_is_auditable(engine, settings):
+    settings.robots_policy = "ignore"
     body = b"<html><body>public evidence</body></html>"
     transport = _transport(
         lambda _request: httpx.Response(

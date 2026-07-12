@@ -259,6 +259,7 @@ def test_unreachable_robots_is_conservative(engine, settings):
 
 
 def test_ignore_mode_treats_robots_as_advisory(engine, settings):
+    settings.robots_policy = "ignore"
     transport, requested = _site(
         {"/": '<a href="/private/secret">private</a>', "/private/secret": "<p>evidence</p>"},
         robots="User-agent: *\nDisallow: /private/\n",
@@ -363,6 +364,8 @@ def test_redirect_cannot_escape_reviewed_source_hosts(engine, settings):
 
     def handler(request: httpx.Request) -> httpx.Response:
         requested.append(str(request.url))
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nAllow: /\n")
         if request.url.host == "scaffco.example":
             return httpx.Response(302, headers={"Location": "https://escape.example/evidence"})
         raise AssertionError("off-origin redirect was fetched")

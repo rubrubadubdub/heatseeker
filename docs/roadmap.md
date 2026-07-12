@@ -115,7 +115,6 @@ improve workflows.
 | Publication-date extraction (`claimed_published_at` exists but no collector populates it) | Freshness weighting (§17.4) needs the content's own date, not just our fetch date — a 1979 guideline fetched today looks "fresh" without it | M4/M5 (extract from meta/JSON-LD/RSS at distillation) |
 | JS rendering (Playwright, permitted-only) | JS-only sites yield little today | when a real source needs it |
 | AI pass-2 source vetting + terms interpretation | Funnel pass 2 | M11 |
-| Proxy/VPN health checks and per-region egress selection | One static proxy is supported, but regional sources may need explicit, healthy routing without evasion | M5/M11 |
 
 ## Sequencing notes
 

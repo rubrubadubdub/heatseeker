@@ -36,12 +36,14 @@ class FetchRedirectBlockedError(Exception):
 
 
 def http_client_kwargs(settings: Settings, transport: httpx.BaseTransport | None) -> dict:
-    """httpx.Client kwargs for egress: an injected test transport wins; otherwise route
-    through the configured proxy when set (basic VPN/region seam, ADR-0013)."""
+    """Central egress kwargs for httpx.Client construction.
+
+    An injected transport (used by tests) takes precedence; otherwise the default
+    transport applies. Egress construction is centralised at this single seam so an
+    alternate transport can be introduced here later without touching call sites.
+    """
     if transport is not None:
         return {"transport": transport}
-    if settings.fetch_proxy_url:
-        return {"proxy": settings.fetch_proxy_url}
     return {}
 
 

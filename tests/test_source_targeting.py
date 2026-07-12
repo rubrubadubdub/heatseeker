@@ -742,6 +742,7 @@ def test_source_and_coverage_workflow_via_ui(engine, settings):
 
 
 def test_robots_override_controls_api_activation_and_ui(engine, settings):
+    settings.robots_policy = "ignore"
     with session_scope(engine) as session:
         source = _source(
             name="Robots advisory source",
