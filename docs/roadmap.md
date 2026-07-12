@@ -113,7 +113,7 @@ improve workflows.
 | Bulk dataset import (CSV/XLSX/Parquet, spec §12.2) | MVP requires ≥1 official dataset import | M4/M5 |
 | RSS/Atom per-entry parsing (feeds stored as one XML doc today) | News/story clustering needs per-article documents | M7 (or earlier) |
 | Autopilot-scheduled crawls (crawls are on-demand) | Needs a cadence policy to avoid 21 sites × every tick | short follow-up |
-| OCR/vision extraction (`evidence_ocr_enabled`/`evidence_vision_enabled` exist, default off, no provider wired) | Scanned PDFs and images carry text the native extractors can't reach; runs record OCR as disabled/unavailable rather than pretending | M11 (AI providers) |
+| OCR/vision extraction (`evidence_ocr_enabled`/`evidence_vision_enabled` exist, default off, no provider wired) | Scanned PDFs and images carry text the native extractors can't reach; runs record OCR as disabled/unavailable rather than pretending | OCR: any time via a free local engine (e.g. Tesseract/RapidOCR — running-cost-free rule: free deps fine, paid services not). Semantic vision: M11 |
 | JS rendering (Playwright, permitted-only) | JS-only sites yield little today | when a real source needs it |
 | AI pass-2 source vetting + terms interpretation | Funnel pass 2 | M11 |
 
