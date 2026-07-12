@@ -1,0 +1,184 @@
+"""Fact reconciliation: observations in, one inspectable assertion per predicate out.
+
+Contradicting observations are preserved on the assertion, never deleted (§17.6). An
+entity with no observations for a predicate gets no assertion at all — missing stays
+missing (§6.3).
+"""
+
+from collections import defaultdict
+
+from heatseeker_common.timeutil import utc_now
+from heatseeker_entity_resolution.resolution import merge_group
+from heatseeker_source_registry.models import SourceDefinition, SourceDocument
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from heatseeker_intelligence import confidence as conf
+from heatseeker_intelligence.models import FactAssertion, FactStatus, Observation
+from heatseeker_intelligence.observations import observations_for, value_key
+
+# Contested share of observations at which a fact is flagged conflicted (§17.6).
+CONFLICT_RATIO = 1 / 3
+
+
+def _document_sources(
+    session: Session, observations: list[Observation]
+) -> dict[str, tuple[SourceDocument, SourceDefinition]]:
+    document_ids = {o.source_document_id for o in observations}
+    rows = session.execute(
+        select(SourceDocument, SourceDefinition)
+        .join(SourceDefinition, SourceDocument.source_definition_id == SourceDefinition.id)
+        .where(SourceDocument.id.in_(document_ids))
+    ).all()
+    return {document.id: (document, source) for document, source in rows}
+
+
+def reconcile(
+    session: Session, organisation_id: str, predicate: str
+) -> FactAssertion | None:
+    """Recompute the assertion for one (entity, predicate) from the whole merge group."""
+    group_ids = [o.id for o in merge_group(session, organisation_id)]
+    canonical_id = group_ids[0]
+    observations = [
+        o
+        for o in observations_for(session, group_ids, predicate)
+        if o.normalisation_status != "rejected"
+    ]
+
+    existing = session.execute(
+        select(FactAssertion).where(
+            FactAssertion.subject_entity_id == canonical_id,
+            FactAssertion.predicate == predicate,
+        )
+    ).scalar_one_or_none()
+
+    if not observations:
+        # Missing ≠ false: no evidence means no assertion. Drop a stale one if the
+        # observations behind it were rejected since.
+        if existing is not None:
+            session.delete(existing)
+            session.flush()
+        return None
+
+    # Group by canonical value; the winning value has the most independent sources,
+    # then the freshest sighting.
+    sources_by_document = _document_sources(session, observations)
+    groups: dict[str, list[Observation]] = defaultdict(list)
+    for observation in observations:
+        groups[value_key(observation.object_value)].append(observation)
+
+    def _group_rank(items: list[Observation]) -> tuple:
+        source_ids = {
+            sources_by_document[o.source_document_id][1].id
+            for o in items
+            if o.source_document_id in sources_by_document
+        }
+        newest = max(o.observed_at for o in items)
+        return (len(source_ids), newest)
+
+    winning_key = max(groups, key=lambda key: _group_rank(groups[key]))
+    supporting = groups[winning_key]
+    contradicting = [o for key, items in groups.items() if key != winning_key for o in items]
+
+    supporting_sources = {
+        sources_by_document[o.source_document_id][1].id
+        for o in supporting
+        if o.source_document_id in sources_by_document
+    }
+    newest = max(o.observed_at for o in supporting)
+    human_verified = any(o.extraction_method == "manual" for o in supporting)
+
+    def _best_authority() -> tuple[float, str | None]:
+        best, best_document = 0.0, None
+        for observation in supporting:
+            pair = sources_by_document.get(observation.source_document_id)
+            if pair is None:
+                continue
+            _document, source = pair
+            score = conf.authority_score(source.authority_tier, source.source_category, predicate)
+            if score > best:
+                best, best_document = score, observation.source_document_id
+        return best, best_document
+
+    authority, best_document_id = _best_authority()
+    breakdown = conf.ConfidenceBreakdown(
+        authority=authority,
+        extraction=max(o.extraction_confidence for o in supporting),
+        match=0.95 if human_verified else 0.85,
+        freshness=conf.freshness_score(predicate, newest),
+        corroboration=conf.corroboration_score(len(supporting_sources)),
+        contradiction=conf.contradiction_score(len(supporting), len(contradicting)),
+    )
+    final = breakdown.final
+
+    contested = bool(contradicting) and (
+        len(contradicting) / (len(supporting) + len(contradicting)) >= CONFLICT_RATIO
+    )
+    stale = breakdown.freshness < conf.STALE_THRESHOLD
+    if contested:
+        status = FactStatus.CONFLICTED
+    elif stale:
+        status = FactStatus.STALE
+    elif (final >= 0.8 and len(supporting_sources) >= 2) or (human_verified and final >= 0.6):
+        status = FactStatus.CONFIRMED
+    elif final >= 0.55:
+        status = FactStatus.PROBABLE
+    elif final >= 0.3:
+        status = FactStatus.POSSIBLE
+    else:
+        status = FactStatus.UNKNOWN
+
+    assertion = existing or FactAssertion(subject_entity_id=canonical_id, predicate=predicate)
+    assertion.value = supporting[-1].object_value
+    assertion.status = status
+    assertion.authority_score = breakdown.authority
+    assertion.extraction_score = breakdown.extraction
+    assertion.match_score = breakdown.match
+    assertion.freshness_score = breakdown.freshness
+    assertion.corroboration_score = breakdown.corroboration
+    assertion.contradiction_score = breakdown.contradiction
+    assertion.final_confidence = final
+    assertion.confidence_vocabulary = conf.vocabulary(
+        final, conflicted=contested, stale=stale, human_verified=human_verified
+    )
+    assertion.supporting_observation_ids = [o.id for o in supporting]
+    assertion.contradicting_observation_ids = [o.id for o in contradicting]
+    assertion.independent_source_count = len(supporting_sources)
+    assertion.best_evidence_document_id = best_document_id
+    assertion.last_observed_at = newest
+    assertion.rule_version = conf.RULE_VERSION
+    assertion.updated_at = utc_now()
+    if existing is None:
+        session.add(assertion)
+    session.flush()
+    return assertion
+
+
+def reconcile_all(session: Session, organisation_id: str) -> list[FactAssertion]:
+    """Reconcile every predicate that has observations for this entity's merge group."""
+    group_ids = [o.id for o in merge_group(session, organisation_id)]
+    predicates = {
+        row
+        for row in session.execute(
+            select(Observation.predicate)
+            .where(Observation.subject_entity_id.in_(group_ids))
+            .distinct()
+        ).scalars()
+    }
+    results = []
+    for predicate in sorted(predicates):
+        assertion = reconcile(session, organisation_id, predicate)
+        if assertion is not None:
+            results.append(assertion)
+    return results
+
+
+def assertions_for(session: Session, organisation_id: str) -> list[FactAssertion]:
+    group_ids = [o.id for o in merge_group(session, organisation_id)]
+    return list(
+        session.execute(
+            select(FactAssertion)
+            .where(FactAssertion.subject_entity_id.in_(group_ids))
+            .order_by(FactAssertion.predicate)
+        ).scalars()
+    )

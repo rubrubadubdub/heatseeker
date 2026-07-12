@@ -9,6 +9,7 @@ dependencies = [
     "heatseeker-industry-packs",
     "heatseeker-source-registry",
     "heatseeker-entity-resolution",
+    "heatseeker-intelligence",
     "heatseeker-ai",
     "heatseeker-api",
     "heatseeker-worker",
@@ -31,6 +32,7 @@ heatseeker-core-domain = { workspace = true }
 heatseeker-industry-packs = { workspace = true }
 heatseeker-source-registry = { workspace = true }
 heatseeker-entity-resolution = { workspace = true }
+heatseeker-intelligence = { workspace = true }
 heatseeker-ai = { workspace = true }
 heatseeker-api = { workspace = true }
 heatseeker-worker = { workspace = true }
