@@ -232,3 +232,108 @@ def api_decide(request: Request, candidate_id: str, payload: DecisionRequest):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ResolutionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/companies/{organisation_id}/profile")
+def api_company_profile(request: Request, organisation_id: str):
+    """Full M5 profile: every field with confidence components and evidence links."""
+    from heatseeker_intelligence import profile as intelligence_profile
+
+    with session_scope(request.app.state.engine) as session:
+        if entities.get_organisation(session, organisation_id) is None:
+            raise HTTPException(status_code=404, detail="organisation not found")
+        assembled = intelligence_profile.assemble(session, organisation_id)
+        return {
+            "canonical": _org_summary(assembled["identity"]["canonical"]),
+            "duplicate_warning_count": len(assembled["duplicate_warnings"]),
+            "facts": [
+                {
+                    "predicate": fact["predicate"],
+                    "value": fact["value"],
+                    "status": fact["status"],
+                    "confidence": fact["confidence"],
+                    "confidence_vocabulary": fact["confidence_vocabulary"],
+                    "components": fact["components"],
+                    "supporting_count": fact["supporting_count"],
+                    "contradicting_count": fact["contradicting_count"],
+                    "independent_source_count": fact["independent_source_count"],
+                    "best_evidence_document_id": (
+                        fact["best_evidence_document"].id
+                        if fact["best_evidence_document"]
+                        else None
+                    ),
+                    "last_observed_at": (
+                        fact["last_observed_at"].isoformat()
+                        if fact["last_observed_at"]
+                        else None
+                    ),
+                }
+                for fact in assembled["facts"]
+            ],
+            "classifications": [
+                {
+                    "pack_id": a.pack_id,
+                    "taxonomy_id": a.taxonomy_id,
+                    "category_id": a.category_id,
+                    "category_label": a.category_label,
+                    "assignment_type": a.assignment_type,
+                    "confidence": a.confidence,
+                    "evidence_count": len(a.evidence_ids),
+                }
+                for a in assembled["classifications"]
+            ],
+            "capabilities": [
+                {
+                    "capability_id": c.capability_id,
+                    "capability_label": c.capability_label,
+                    "capability_status": c.capability_status,
+                    "evidence_strength": c.evidence_strength,
+                    "evidence_count": len(c.evidence_ids),
+                }
+                for c in assembled["capabilities"]
+            ],
+            "size_estimates": [
+                {
+                    "concept": e.concept,
+                    "band": e.band,
+                    "confidence": e.confidence,
+                    "basis": e.basis,
+                }
+                for e in assembled["size_estimates"]
+            ],
+            "research_questions": [
+                {
+                    "id": q.id,
+                    "question_type": q.question_type,
+                    "question_text": q.question_text,
+                    "priority": q.priority,
+                    "reason": q.reason,
+                }
+                for q in assembled["research_questions"]
+            ],
+        }
+
+
+@router.get("/discovery/runs")
+def api_discovery_runs(request: Request):
+    from heatseeker_intelligence.discovery import list_runs
+
+    with session_scope(request.app.state.engine) as session:
+        return {
+            "runs": [
+                {
+                    "id": run.id,
+                    "dataset_name": run.dataset_name,
+                    "publisher": run.publisher,
+                    "status": run.status,
+                    "checksum": run.checksum,
+                    "row_count": run.row_count,
+                    "imported_count": run.imported_count,
+                    "matched_existing_count": run.matched_existing_count,
+                    "skipped_out_of_scope_count": run.skipped_out_of_scope_count,
+                    "rejected_count": run.rejected_count,
+                    "created_at": run.created_at.isoformat(),
+                }
+                for run in list_runs(session)
+            ]
+        }

@@ -28,9 +28,50 @@
   remain intact and attributable below.
 </div>
 {% endif %}
+{% if intel.duplicate_warnings %}
+<div class="alert alert-warning py-2 small">
+  {{ intel.duplicate_warnings | length }} unresolved duplicate candidate{{ 's' if intel.duplicate_warnings | length != 1 }}
+  involve this record — review in the <a href="/resolution">resolution queue</a>.
+</div>
+{% endif %}
+{% if intel.conflicts %}
+<div class="alert alert-danger py-2 small">
+  Sources disagree on:
+  {% for fact in intel.conflicts %}<code>{{ fact.predicate }}</code>{{ ", " if not loop.last }}{% endfor %}
+  — both sides are preserved below.
+</div>
+{% endif %}
 
 <div class="row g-4">
   <div class="col-lg-8">
+    <h2 class="h6">Evidence summary <span class="text-secondary fw-normal">(every field: value · confidence · sources · conflicts)</span></h2>
+    <table class="table table-sm align-middle">
+      <thead><tr><th>field</th><th>value</th><th>confidence</th><th>sources</th><th>conflicts</th><th>evidence</th></tr></thead>
+      <tbody>
+      {% for fact in intel.facts %}
+        <tr>
+          <td class="small">{{ fact.predicate }}</td>
+          <td class="small">{{ fact.value if fact.value is string else fact.value | tojson }}</td>
+          <td>
+            <span class="badge text-bg-{{ {'verified':'success','high':'success','moderate':'primary','low':'warning','speculative':'warning','conflicted':'danger','stale':'secondary','unknown':'secondary'}[fact.confidence_vocabulary] }}"
+                  title="authority {{ fact.components.authority }} · extraction {{ fact.components.extraction }} · match {{ fact.components.match }} · freshness {{ fact.components.freshness }} · corroboration {{ fact.components.corroboration }} · contradiction {{ fact.components.contradiction }}">
+              {{ fact.confidence_vocabulary }} {{ '%.2f' % fact.confidence }}
+            </span>
+          </td>
+          <td class="small">{{ fact.independent_source_count }}</td>
+          <td class="small">{% if fact.contradicting_count %}<span class="text-danger">{{ fact.contradicting_count }}</span>{% else %}—{% endif %}</td>
+          <td class="small">
+            {% if fact.best_evidence_document %}
+            <a href="/evidence/{{ fact.best_evidence_document.id }}">view</a>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="small text-secondary">No evidence-backed facts yet — import a dataset or add manual evidence. Missing stays missing.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
     <h2 class="h6">Identifiers</h2>
     <table class="table table-sm">
       <thead><tr><th>scheme</th><th>value</th><th>origin record</th></tr></thead>
@@ -85,6 +126,55 @@
       </tbody>
     </table>
 
+    <h2 class="h6">Commercial summary</h2>
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header py-1 small">Classifications (multi-axis, explainable)</div>
+          <div class="card-body py-2 small">
+            {% for assignment in intel.classifications %}
+            <div class="mb-1">
+              <span class="badge text-bg-dark">{{ assignment.taxonomy_id }}</span>
+              {{ assignment.category_label or assignment.category_id }}
+              <span class="text-secondary">· {{ assignment.assignment_type }} ·
+                {{ '%.2f' % assignment.confidence }} ·
+                {{ assignment.evidence_ids | length }} evidence</span>
+            </div>
+            {% else %}<span class="text-secondary">none assigned yet</span>{% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header py-1 small">Service capabilities (status is earned, not asserted)</div>
+          <div class="card-body py-2 small">
+            {% for capability in intel.capabilities %}
+            <div class="mb-1">
+              {{ capability.capability_label or capability.capability_id }}
+              <span class="badge text-bg-{{ {'verified':'success','repeatedly_evidenced':'success','evidenced':'primary','claimed':'warning','historical':'secondary','uncertain':'secondary','contradicted':'danger'}[capability.capability_status] }}">
+                {{ capability.capability_status }}</span>
+              <span class="text-secondary">· {{ capability.evidence_ids | length }} evidence</span>
+            </div>
+            {% else %}<span class="text-secondary">no capability evidence yet</span>{% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header py-1 small">Size &amp; tier (bands only — unresolved means insufficient evidence, not small)</div>
+          <div class="card-body py-2 small d-flex flex-wrap gap-3">
+            {% for estimate in intel.size_estimates %}
+            <div>
+              <span class="text-secondary">{{ estimate.concept.replace('_', ' ') }}:</span>
+              <strong>{{ estimate.band }}</strong>
+              {% if estimate.band != 'unresolved' %}<span class="text-secondary">({{ '%.2f' % estimate.confidence }})</span>{% endif %}
+            </div>
+            {% else %}<span class="text-secondary">not yet estimated</span>{% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <h2 class="h6">Operational units (never flattened into the legal entity)</h2>
     <table class="table table-sm">
       <thead><tr><th>type</th><th>name</th><th>status</th><th>origin record</th></tr></thead>
@@ -121,6 +211,26 @@
       </div>
     </div>
     {% endif %}
+
+    <div class="card mb-3">
+      <div class="card-header">Research gaps</div>
+      <div class="card-body small">
+        {% for question in intel.research_questions %}
+        <div class="border-bottom pb-2 mb-2">
+          <strong>{{ question.question_text }}</strong><br>
+          <span class="text-secondary">{{ question.reason }} · priority {{ '%.2f' % question.priority }}</span>
+          <div class="d-flex gap-1 mt-1">
+            <form method="post" action="/research-questions/{{ question.id }}/resolved">
+              <button class="btn btn-sm btn-outline-success py-0">Resolved</button>
+            </form>
+            <form method="post" action="/research-questions/{{ question.id }}/dismissed">
+              <button class="btn btn-sm btn-outline-secondary py-0">Dismiss</button>
+            </form>
+          </div>
+        </div>
+        {% else %}<span class="text-secondary">No open research questions.</span>{% endfor %}
+      </div>
+    </div>
 
     <div class="card">
       <div class="card-header">Merge history</div>

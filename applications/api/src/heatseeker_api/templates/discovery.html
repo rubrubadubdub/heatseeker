@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Discovery · Heatseeker{% endblock %}
+{% block content %}
+<h1 class="h3 mb-2">Company discovery — bulk dataset import</h1>
+<p class="small text-secondary">
+  Import an official dataset (e.g. an ABR/NZBN extract) as CSV. The raw file is preserved
+  as immutable evidence; every row becomes observations with row-level provenance; rows
+  become organisations through identifier-first matching, and possible duplicates go to
+  the <a href="/resolution">resolution queue</a> — nothing merges silently.
+  {% if scope %}Active scope <strong>{{ scope.name }}</strong> filters rows by geography;
+  out-of-scope rows are counted, not imported.{% endif %}
+</p>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <table class="table table-sm align-middle">
+      <thead><tr><th>dataset</th><th>status</th><th>rows</th><th>result</th><th>provenance</th></tr></thead>
+      <tbody>
+      {% for run in runs %}
+        <tr>
+          <td>
+            {{ run.dataset_name }}
+            <div class="small text-secondary">{{ run.publisher or '' }}
+              {% if run.coverage_date %}· coverage {{ run.coverage_date }}{% endif %}
+              · {{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+          </td>
+          <td><span class="badge text-bg-{{ run_status_badges.get(run.status, 'secondary') }}">{{ run.status }}</span>
+            {% if run.error %}<div class="small text-danger">{{ run.error[:200] }}</div>{% endif %}
+          </td>
+          <td class="small">{{ run.row_count }}</td>
+          <td class="small">
+            {{ run.imported_count }} new · {{ run.matched_existing_count }} matched
+            {% if run.skipped_out_of_scope_count %} · {{ run.skipped_out_of_scope_count }} out of scope{% endif %}
+            {% if run.rejected_count %} · <span class="text-danger">{{ run.rejected_count }} rejected</span>{% endif %}
+          </td>
+          <td class="small mono">
+            {% if run.source_document_id %}<a href="/evidence/{{ run.source_document_id }}">{{ run.checksum[:12] }}</a>
+            {% else %}{{ run.checksum[:12] }}{% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="small text-secondary">No imports yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header">Import a dataset (CSV)</div>
+      <div class="card-body">
+        <form method="post" action="/discovery/import" enctype="multipart/form-data" class="vstack gap-2">
+          <input type="file" name="dataset_file" class="form-control form-control-sm" accept=".csv,text/csv" required>
+          <input name="dataset_name" class="form-control form-control-sm" placeholder="Dataset name (e.g. ABR bulk extract QLD)" required>
+          <div class="row g-2">
+            <div class="col"><input name="publisher" class="form-control form-control-sm" placeholder="Publisher"></div>
+            <div class="col"><input name="dataset_version" class="form-control form-control-sm" placeholder="Version"></div>
+          </div>
+          <div class="row g-2">
+            <div class="col"><input name="coverage_date" class="form-control form-control-sm" placeholder="Coverage date"></div>
+            <div class="col"><input name="country" class="form-control form-control-sm" placeholder="Country (AU/NZ)"></div>
+          </div>
+          <input name="licence_note" class="form-control form-control-sm" placeholder="Licence / use note">
+          <hr class="my-1">
+          <div class="small text-secondary">Column mapping (CSV header names)</div>
+          {% for field_name, label, required in column_fields %}
+          <input name="col_{{ field_name }}" class="form-control form-control-sm"
+                 placeholder="{{ label }}{{ ' *' if required }}" {{ 'required' if required }}>
+          {% endfor %}
+          <div class="input-group input-group-sm">
+            <span class="input-group-text">identifier scheme</span>
+            <select name="identifier_scheme" class="form-select">
+              <option value="abn">abn</option>
+              <option value="acn">acn</option>
+              <option value="nzbn">nzbn</option>
+              <option value="company_number">company_number</option>
+              <option value="lei">lei</option>
+              <option value="other">other</option>
+            </select>
+          </div>
+          <button class="btn btn-sm btn-primary">Import (queued as a job)</button>
+          <div class="form-text">Dataset name, publisher, version, coverage date, licence,
+            checksum, and the column mapping are all recorded (spec §12.2). Re-importing an
+            identical file is refused.</div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

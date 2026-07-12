@@ -14,12 +14,13 @@ from heatseeker_entity_resolution.models import (
 )
 from heatseeker_entity_resolution.resolution import (
     ResolutionError,
-    group_profile,
     list_queue,
     perform_merge,
     record_decision,
     reverse_merge,
 )
+from heatseeker_intelligence import gaps
+from heatseeker_intelligence import profile as intelligence_profile
 from sqlalchemy import select
 
 from heatseeker_api.ui_routes import _redirect, _render
@@ -120,7 +121,8 @@ def entity_detail(request: Request, organisation_id: str):
         organisation = entities.get_organisation(session, organisation_id)
         if organisation is None:
             return _redirect("/entities", "Organisation not found", "danger")
-        profile = group_profile(session, organisation_id)
+        intel = intelligence_profile.assemble(session, organisation_id)
+        profile = intel["identity"]
         merges = list(
             session.execute(
                 select(EntityMerge)
@@ -137,8 +139,26 @@ def entity_detail(request: Request, organisation_id: str):
             active="entities",
             organisation=organisation,
             profile=profile,
+            intel=intel,
             merges=merges,
         )
+
+
+@router.post("/research-questions/{question_id}/{action}")
+def research_question_action(request: Request, question_id: str, action: str):
+    engine = request.app.state.engine
+    if action not in ("resolved", "dismissed"):
+        return _redirect("/entities", "Unknown research-question action", "danger")
+    try:
+        with session_scope(engine) as session:
+            question = gaps.resolve_question(
+                session, question_id, status=action, actor="user"
+            )
+            entity_id = question.entity_id
+    except (LookupError, ValueError) as exc:
+        return _redirect("/entities", str(exc), "danger")
+    target = f"/entities/{entity_id}" if entity_id else "/entities"
+    return _redirect(target, f"Research question {action}")
 
 
 @router.post("/entities/{organisation_id}/merge")
