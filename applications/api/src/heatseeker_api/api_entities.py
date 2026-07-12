@@ -246,6 +246,28 @@ def api_company_profile(request: Request, organisation_id: str):
         return {
             "canonical": _org_summary(assembled["identity"]["canonical"]),
             "duplicate_warning_count": len(assembled["duplicate_warnings"]),
+            "identity_evidence": {
+                predicate: {
+                    "confidence": fact["confidence"],
+                    "confidence_vocabulary": fact["confidence_vocabulary"],
+                    "best_evidence_document_id": (
+                        fact["best_evidence_document"].id
+                        if fact["best_evidence_document"]
+                        else None
+                    ),
+                }
+                for predicate, fact in assembled["fact_by_predicate"].items()
+                if predicate
+                in {
+                    "canonical_name",
+                    "legal_name",
+                    "registration_identifier",
+                    "website_domain",
+                    "location",
+                    "phone",
+                    "email",
+                }
+            },
             "facts": [
                 {
                     "predicate": fact["predicate"],
@@ -279,6 +301,10 @@ def api_company_profile(request: Request, organisation_id: str):
                     "assignment_type": a.assignment_type,
                     "confidence": a.confidence,
                     "evidence_count": len(a.evidence_ids),
+                    "evidence_document_ids": [
+                        document.id
+                        for document in assembled["classification_evidence"].get(a.id, [])
+                    ],
                 }
                 for a in assembled["classifications"]
             ],
@@ -289,6 +315,10 @@ def api_company_profile(request: Request, organisation_id: str):
                     "capability_status": c.capability_status,
                     "evidence_strength": c.evidence_strength,
                     "evidence_count": len(c.evidence_ids),
+                    "evidence_document_ids": [
+                        document.id
+                        for document in assembled["capability_evidence"].get(c.id, [])
+                    ],
                 }
                 for c in assembled["capabilities"]
             ],
@@ -298,6 +328,9 @@ def api_company_profile(request: Request, organisation_id: str):
                     "band": e.band,
                     "confidence": e.confidence,
                     "basis": e.basis,
+                    "evidence_document_ids": [
+                        document.id for document in assembled["size_evidence"].get(e.id, [])
+                    ],
                 }
                 for e in assembled["size_estimates"]
             ],
@@ -327,6 +360,10 @@ def api_discovery_runs(request: Request):
                     "publisher": run.publisher,
                     "status": run.status,
                     "checksum": run.checksum,
+                    "source_document_id": run.source_document_id,
+                    "authority_tier": run.authority_tier,
+                    "scope_snapshot": run.scope_snapshot,
+                    "pack_snapshot": run.pack_snapshot,
                     "row_count": run.row_count,
                     "imported_count": run.imported_count,
                     "matched_existing_count": run.matched_existing_count,

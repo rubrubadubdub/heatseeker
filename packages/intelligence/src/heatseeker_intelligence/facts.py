@@ -19,6 +19,7 @@ from heatseeker_intelligence.observations import observations_for, value_key
 
 # Contested share of observations at which a fact is flagged conflicted (§17.6).
 CONFLICT_RATIO = 1 / 3
+NON_ASSERTION_PREDICATES = {"service_claim", "archetype_claim"}
 
 
 def _document_sources(
@@ -52,6 +53,14 @@ def reconcile(
         )
     ).scalar_one_or_none()
 
+    # These predicates are multi-valued evidence inputs to classification/capability
+    # ledgers. Treating different services as contradictory scalar facts is incorrect.
+    if predicate in NON_ASSERTION_PREDICATES:
+        if existing is not None:
+            session.delete(existing)
+            session.flush()
+        return None
+
     if not observations:
         # Missing ≠ false: no evidence means no assertion. Drop a stale one if the
         # observations behind it were rejected since.
@@ -60,21 +69,30 @@ def reconcile(
             session.flush()
         return None
 
-    # Group by canonical value; the winning value has the most independent sources,
-    # then the freshest sighting.
+    # Group by canonical value. Authority leads; independent corroboration can strengthen
+    # it but cannot let a pile of weak directories outvote a primary registry.
     sources_by_document = _document_sources(session, observations)
     groups: dict[str, list[Observation]] = defaultdict(list)
     for observation in observations:
         groups[value_key(observation.object_value)].append(observation)
 
     def _group_rank(items: list[Observation]) -> tuple:
-        source_ids = {
-            sources_by_document[o.source_document_id][1].id
+        sources = {
+            sources_by_document[o.source_document_id][1]
             for o in items
             if o.source_document_id in sources_by_document
         }
+        best_authority = max(
+            (
+                conf.authority_score(source.authority_tier, source.source_category, predicate)
+                for source in sources
+            ),
+            default=0.0,
+        )
+        authority_with_corroboration = best_authority * conf.corroboration_score(len(sources))
+        extraction = max(o.extraction_confidence for o in items)
         newest = max(o.observed_at for o in items)
-        return (len(source_ids), newest)
+        return (authority_with_corroboration, extraction, len(sources), newest)
 
     winning_key = max(groups, key=lambda key: _group_rank(groups[key]))
     supporting = groups[winning_key]
@@ -85,8 +103,13 @@ def reconcile(
         for o in supporting
         if o.source_document_id in sources_by_document
     }
+    contradicting_sources = {
+        sources_by_document[o.source_document_id][1].id
+        for o in contradicting
+        if o.source_document_id in sources_by_document
+    }
     newest = max(o.observed_at for o in supporting)
-    human_verified = any(o.extraction_method == "manual" for o in supporting)
+    human_verified = any(o.human_verified for o in supporting)
 
     def _best_authority() -> tuple[float, str | None]:
         best, best_document = 0.0, None
@@ -107,12 +130,15 @@ def reconcile(
         match=0.95 if human_verified else 0.85,
         freshness=conf.freshness_score(predicate, newest),
         corroboration=conf.corroboration_score(len(supporting_sources)),
-        contradiction=conf.contradiction_score(len(supporting), len(contradicting)),
+        contradiction=conf.contradiction_score(
+            len(supporting_sources), len(contradicting_sources)
+        ),
     )
     final = breakdown.final
 
-    contested = bool(contradicting) and (
-        len(contradicting) / (len(supporting) + len(contradicting)) >= CONFLICT_RATIO
+    source_total = len(supporting_sources) + len(contradicting_sources)
+    contested = bool(contradicting_sources) and source_total > 0 and (
+        len(contradicting_sources) / source_total >= CONFLICT_RATIO
     )
     stale = breakdown.freshness < conf.STALE_THRESHOLD
     if contested:
@@ -174,11 +200,11 @@ def reconcile_all(session: Session, organisation_id: str) -> list[FactAssertion]
 
 
 def assertions_for(session: Session, organisation_id: str) -> list[FactAssertion]:
-    group_ids = [o.id for o in merge_group(session, organisation_id)]
+    canonical = merge_group(session, organisation_id)[0]
     return list(
         session.execute(
             select(FactAssertion)
-            .where(FactAssertion.subject_entity_id.in_(group_ids))
+            .where(FactAssertion.subject_entity_id == canonical.id)
             .order_by(FactAssertion.predicate)
         ).scalars()
     )

@@ -3,7 +3,7 @@
 {% block content %}
 <h1 class="h3 mb-2">Company discovery — bulk dataset import</h1>
 <p class="small text-secondary">
-  Import an official dataset (e.g. an ABR/NZBN extract) as CSV. The raw file is preserved
+  Import a dataset (e.g. an ABR/NZBN extract) as CSV. The raw file is preserved
   as immutable evidence; every row becomes observations with row-level provenance; rows
   become organisations through identifier-first matching, and possible duplicates go to
   the <a href="/resolution">resolution queue</a> — nothing merges silently.
@@ -22,6 +22,7 @@
             {{ run.dataset_name }}
             <div class="small text-secondary">{{ run.publisher or '' }}
               {% if run.coverage_date %}· coverage {{ run.coverage_date }}{% endif %}
+              · authority tier {{ run.authority_tier }}
               · {{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
           </td>
           <td><span class="badge text-bg-{{ run_status_badges.get(run.status, 'secondary') }}">{{ run.status }}</span>
@@ -47,10 +48,11 @@
 
   <div class="col-lg-5">
     <div class="card">
-      <div class="card-header">Import a dataset (CSV)</div>
+      <div class="card-header">Import a dataset (CSV or single-CSV ZIP)</div>
       <div class="card-body">
         <form method="post" action="/discovery/import" enctype="multipart/form-data" class="vstack gap-2">
-          <input type="file" name="dataset_file" class="form-control form-control-sm" accept=".csv,text/csv" required>
+          <input type="file" name="dataset_file" class="form-control form-control-sm"
+                 accept=".csv,.zip,text/csv,application/zip" required>
           <input name="dataset_name" class="form-control form-control-sm" placeholder="Dataset name (e.g. ABR bulk extract QLD)" required>
           <div class="row g-2">
             <div class="col"><input name="publisher" class="form-control form-control-sm" placeholder="Publisher"></div>
@@ -61,6 +63,22 @@
             <div class="col"><input name="country" class="form-control form-control-sm" placeholder="Country (AU/NZ)"></div>
           </div>
           <input name="licence_note" class="form-control form-control-sm" placeholder="Licence / use note">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text">source authority</span>
+            <select name="authority_tier" class="form-select">
+              <option value="5" selected>Tier 5 — unverified/user dataset (safe default)</option>
+              <option value="1">Tier 1 — primary official registry</option>
+              <option value="2">Tier 2 — official government dataset</option>
+              <option value="3">Tier 3 — regulator/authoritative industry source</option>
+              <option value="4">Tier 4 — first-party company source</option>
+              <option value="6">Tier 6 — directory/aggregator</option>
+              <option value="7">Tier 7 — weak/unverified source</option>
+            </select>
+          </div>
+          <select name="pack_id" class="form-select form-select-sm">
+            <option value="">No industry vocabulary claims</option>
+            {% for pack_id in pack_ids %}<option value="{{ pack_id }}">{{ pack_id }}</option>{% endfor %}
+          </select>
           <hr class="my-1">
           <div class="small text-secondary">Column mapping (CSV header names)</div>
           {% for field_name, label, required in column_fields %}
@@ -80,8 +98,9 @@
           </div>
           <button class="btn btn-sm btn-primary">Import (queued as a job)</button>
           <div class="form-text">Dataset name, publisher, version, coverage date, licence,
-            checksum, and the column mapping are all recorded (spec §12.2). Re-importing an
-            identical file is refused.</div>
+            checksum, mapping, active-scope snapshot, and declared authority are recorded.
+            Service/archetype columns accept pack IDs separated by comma, semicolon, or |.
+            An identical source + mapping + transformation is refused.</div>
         </form>
       </div>
     </div>

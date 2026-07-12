@@ -12,7 +12,7 @@ from datetime import datetime
 
 from heatseeker_common.timeutil import utc_now
 
-RULE_VERSION = "confidence/0.1"
+RULE_VERSION = "confidence/0.2"
 
 # Freshness half-lives in days, per predicate (§17.4). None = no decay (historical
 # events stay true). Unlisted predicates use DEFAULT_HALF_LIFE_DAYS.

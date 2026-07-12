@@ -14,6 +14,7 @@ from heatseeker_common.db import Base, UTCDateTime
 from heatseeker_common.timeutil import utc_now
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     Float,
     ForeignKey,
@@ -137,6 +138,9 @@ class Observation(Base):
     normalisation_status: Mapped[str] = mapped_column(
         String(20), default=NormalisationStatus.NORMALISED
     )
+    human_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verified_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class FactAssertion(Base):
@@ -275,6 +279,12 @@ class BulkImportRun(Base):
     """Full provenance for one bulk dataset import (spec §12.2)."""
 
     __tablename__ = "bulk_import_run"
+    __table_args__ = (
+        CheckConstraint(
+            "authority_tier >= 1 AND authority_tier <= 7",
+            name="authority_tier_range",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
     dataset_name: Mapped[str] = mapped_column(String(300))
@@ -284,6 +294,9 @@ class BulkImportRun(Base):
     licence_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     checksum: Mapped[str] = mapped_column(String(64), index=True)
     mapping: Mapped[dict] = mapped_column(JSON, default=dict)
+    scope_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    pack_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    authority_tier: Mapped[int] = mapped_column(default=5)
     source_definition_id: Mapped[str | None] = mapped_column(
         ForeignKey("source_definition.id"), nullable=True
     )

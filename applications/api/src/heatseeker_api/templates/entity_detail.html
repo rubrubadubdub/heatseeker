@@ -12,6 +12,9 @@
       provenance {{ organisation.provenance }} ·
       profile {{ '%.0f' % (organisation.profile_completeness * 100) }}% ·
       first observed {{ organisation.first_observed_at.date() }}
+      {% set canonical_fact = intel.fact_by_predicate.get('canonical_name') %}
+      {% if canonical_fact %} · name confidence {{ canonical_fact.confidence_vocabulary }}
+        {{ '%.2f' % canonical_fact.confidence }}{% endif %}
     </p>
   </div>
 </div>
@@ -73,29 +76,35 @@
     </table>
 
     <h2 class="h6">Identifiers</h2>
+    {% set identifier_fact = intel.fact_by_predicate.get('registration_identifier') %}
     <table class="table table-sm">
-      <thead><tr><th>scheme</th><th>value</th><th>origin record</th></tr></thead>
+      <thead><tr><th>scheme</th><th>value</th><th>confidence</th><th>evidence</th><th>origin record</th></tr></thead>
       <tbody>
       {% for row in profile.identifiers %}
         <tr>
           <td class="small">{{ row.item.scheme }}</td>
           <td class="mono">{{ row.item.value }}</td>
+          <td class="small">{% if identifier_fact %}{{ identifier_fact.confidence_vocabulary }} {{ '%.2f' % identifier_fact.confidence }}{% else %}unknown{% endif %}</td>
+          <td class="small">{% if identifier_fact and identifier_fact.best_evidence_document %}<a href="/evidence/{{ identifier_fact.best_evidence_document.id }}">view</a>{% else %}—{% endif %}</td>
           <td class="small">
             {% if row.origin.id == canonical.id %}—{% else %}
             <a href="/entities/{{ row.origin.id }}">{{ row.origin.canonical_name }}</a>{% endif %}
           </td>
         </tr>
-      {% else %}<tr><td colspan="3" class="small text-secondary">none recorded</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="5" class="small text-secondary">none recorded</td></tr>{% endfor %}
       </tbody>
     </table>
 
     <h2 class="h6">Domains</h2>
+    {% set domain_fact = intel.fact_by_predicate.get('website_domain') %}
     <table class="table table-sm">
       <tbody>
       {% for row in profile.domains %}
         <tr>
           <td class="mono">{{ row.item.domain }}</td>
           <td class="small">{% if row.item.is_primary %}<span class="badge text-bg-primary">primary</span>{% endif %}</td>
+          <td class="small">{% if domain_fact %}{{ domain_fact.confidence_vocabulary }} {{ '%.2f' % domain_fact.confidence }}{% else %}unknown{% endif %}</td>
+          <td class="small">{% if domain_fact and domain_fact.best_evidence_document %}<a href="/evidence/{{ domain_fact.best_evidence_document.id }}">view</a>{% else %}—{% endif %}</td>
           <td class="small">
             {% if row.origin.id == canonical.id %}—{% else %}
             <a href="/entities/{{ row.origin.id }}">{{ row.origin.canonical_name }}</a>{% endif %}
@@ -107,7 +116,7 @@
 
     <h2 class="h6">Contact points</h2>
     <table class="table table-sm">
-      <thead><tr><th>type</th><th>value</th><th>flags</th><th>origin record</th></tr></thead>
+      <thead><tr><th>type</th><th>value</th><th>flags</th><th>confidence</th><th>evidence</th><th>origin record</th></tr></thead>
       <tbody>
       {% for row in profile.contact_points %}
         <tr>
@@ -117,12 +126,16 @@
             {% if row.item.role_based %}<span class="badge text-bg-secondary">role</span>{% endif %}
             {% if not row.item.public_business_contact %}<span class="badge text-bg-danger">non-public</span>{% endif %}
           </td>
+          {% set contact_predicate = 'phone' if row.item.contact_type == 'phone' else ('email' if 'email' in row.item.contact_type else '') %}
+          {% set contact_fact = intel.fact_by_predicate.get(contact_predicate) if contact_predicate else none %}
+          <td class="small">{% if contact_fact %}{{ contact_fact.confidence_vocabulary }} {{ '%.2f' % contact_fact.confidence }}{% else %}unknown{% endif %}</td>
+          <td class="small">{% if contact_fact and contact_fact.best_evidence_document %}<a href="/evidence/{{ contact_fact.best_evidence_document.id }}">view</a>{% else %}—{% endif %}</td>
           <td class="small">
             {% if row.origin.id == canonical.id %}—{% else %}
             <a href="/entities/{{ row.origin.id }}">{{ row.origin.canonical_name }}</a>{% endif %}
           </td>
         </tr>
-      {% else %}<tr><td colspan="4" class="small text-secondary">none recorded</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="6" class="small text-secondary">none recorded</td></tr>{% endfor %}
       </tbody>
     </table>
 
@@ -139,6 +152,9 @@
               <span class="text-secondary">· {{ assignment.assignment_type }} ·
                 {{ '%.2f' % assignment.confidence }} ·
                 {{ assignment.evidence_ids | length }} evidence</span>
+              {% for document in intel.classification_evidence.get(assignment.id, []) %}
+                <a href="/evidence/{{ document.id }}">view</a>{% if not loop.last %}, {% endif %}
+              {% endfor %}
             </div>
             {% else %}<span class="text-secondary">none assigned yet</span>{% endfor %}
           </div>
@@ -154,6 +170,9 @@
               <span class="badge text-bg-{{ {'verified':'success','repeatedly_evidenced':'success','evidenced':'primary','claimed':'warning','historical':'secondary','uncertain':'secondary','contradicted':'danger'}[capability.capability_status] }}">
                 {{ capability.capability_status }}</span>
               <span class="text-secondary">· {{ capability.evidence_ids | length }} evidence</span>
+              {% for document in intel.capability_evidence.get(capability.id, []) %}
+                <a href="/evidence/{{ document.id }}">view</a>{% if not loop.last %}, {% endif %}
+              {% endfor %}
             </div>
             {% else %}<span class="text-secondary">no capability evidence yet</span>{% endfor %}
           </div>
@@ -168,6 +187,9 @@
               <span class="text-secondary">{{ estimate.concept.replace('_', ' ') }}:</span>
               <strong>{{ estimate.band }}</strong>
               {% if estimate.band != 'unresolved' %}<span class="text-secondary">({{ '%.2f' % estimate.confidence }})</span>{% endif %}
+              {% for document in intel.size_evidence.get(estimate.id, []) %}
+                <a href="/evidence/{{ document.id }}">evidence</a>{% if not loop.last %}, {% endif %}
+              {% endfor %}
             </div>
             {% else %}<span class="text-secondary">not yet estimated</span>{% endfor %}
           </div>
@@ -211,6 +233,32 @@
       </div>
     </div>
     {% endif %}
+
+    <div class="card mb-3">
+      <div class="card-header">Add evidence-backed observation</div>
+      <div class="card-body small">
+        <form method="post" action="/entities/{{ canonical.id }}/observations/create" class="vstack gap-2">
+          <input name="source_document_id" class="form-control form-control-sm mono"
+                 placeholder="Evidence document id" required>
+          <input name="predicate" class="form-control form-control-sm"
+                 placeholder="Predicate, e.g. phone" required>
+          <textarea name="value" class="form-control form-control-sm" rows="2"
+                    placeholder="Value (text or JSON)" required></textarea>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text">extraction confidence</span>
+            <input name="extraction_confidence" type="number" min="0" max="1" step="0.05"
+                   value="0.8" class="form-control">
+          </div>
+          <label class="form-check">
+            <input class="form-check-input" type="checkbox" name="human_verified" value="1">
+            <span class="form-check-label">I independently verified this value</span>
+          </label>
+          <button class="btn btn-sm btn-outline-primary">Record observation</button>
+          <div class="form-text">Manual entry is not automatically “verified.” Upload or
+            select immutable evidence first; verification requires the explicit checkbox.</div>
+        </form>
+      </div>
+    </div>
 
     <div class="card mb-3">
       <div class="card-header">Research gaps</div>

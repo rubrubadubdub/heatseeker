@@ -1,5 +1,6 @@
-"""GUI routes for the entity core & resolution queue (M4)."""
+"""GUI routes for entity resolution and evidence-backed company profiles."""
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Query, Request
@@ -21,6 +22,9 @@ from heatseeker_entity_resolution.resolution import (
 )
 from heatseeker_intelligence import gaps
 from heatseeker_intelligence import profile as intelligence_profile
+from heatseeker_intelligence.models import ExtractionMethod
+from heatseeker_intelligence.observations import record_observation
+from heatseeker_source_registry.models import SourceDocument
 from sqlalchemy import select
 
 from heatseeker_api.ui_routes import _redirect, _render
@@ -35,6 +39,16 @@ MATCH_STATE_BADGES = {
     "confirmed_distinct": "secondary",
     "unresolved": "secondary",
 }
+
+
+def _manual_value(raw: str):
+    text = raw.strip()
+    if not text:
+        raise ValueError("observation value must not be blank")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
 
 
 @router.get("/entities", response_class=HTMLResponse)
@@ -159,6 +173,44 @@ def research_question_action(request: Request, question_id: str, action: str):
         return _redirect("/entities", str(exc), "danger")
     target = f"/entities/{entity_id}" if entity_id else "/entities"
     return _redirect(target, f"Research question {action}")
+
+
+@router.post("/entities/{organisation_id}/observations/create")
+def create_manual_observation(
+    request: Request,
+    organisation_id: str,
+    source_document_id: Annotated[str, Form()],
+    predicate: Annotated[str, Form()],
+    value: Annotated[str, Form()],
+    extraction_confidence: Annotated[float, Form()] = 0.8,
+    human_verified: Annotated[str | None, Form()] = None,
+):
+    try:
+        with session_scope(request.app.state.engine) as session:
+            organisation = entities.get_organisation(session, organisation_id)
+            if organisation is None:
+                raise LookupError("organisation not found")
+            document = session.get(SourceDocument, source_document_id.strip())
+            if document is None:
+                raise LookupError("source document not found")
+            record_observation(
+                session,
+                document,
+                predicate,
+                _manual_value(value),
+                subject_entity_id=organisation.id,
+                extraction_method=ExtractionMethod.MANUAL,
+                extraction_confidence=extraction_confidence,
+                human_verified=human_verified == "1",
+                verified_by="user" if human_verified == "1" else None,
+            )
+            intelligence_profile.refresh(session, organisation.id)
+    except (LookupError, ValueError) as exc:
+        return _redirect(f"/entities/{organisation_id}", str(exc), "danger")
+    return _redirect(
+        f"/entities/{organisation_id}",
+        "Manual observation recorded with evidence provenance",
+    )
 
 
 @router.post("/entities/{organisation_id}/merge")

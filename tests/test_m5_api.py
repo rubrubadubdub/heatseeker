@@ -111,3 +111,35 @@ def test_ui_entity_profile_sections_and_gap_actions(engine, settings):
     assert done.status_code == 303
     refreshed = client.get(f"/api/companies/{acme['id']}/profile").json()
     assert question_id not in [q["id"] for q in refreshed["research_questions"]]
+
+
+def test_manual_observation_requires_explicit_verification_and_links_evidence(
+    engine, settings
+):
+    _import_dataset(engine, settings)
+    client = TestClient(create_app(settings))
+    acme = next(
+        organisation
+        for organisation in client.get("/api/entities").json()["organisations"]
+        if organisation["canonical_name"].startswith("Acme")
+    )
+    run = client.get("/api/discovery/runs").json()["runs"][0]
+
+    created = client.post(
+        f"/entities/{acme['id']}/observations/create",
+        data={
+            "source_document_id": run["source_document_id"],
+            "predicate": "phone",
+            "value": "+61 7 3333 1111",
+            "extraction_confidence": "0.9",
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
+    profile = client.get(f"/api/companies/{acme['id']}/profile").json()
+    phone = next(fact for fact in profile["facts"] if fact["predicate"] == "phone")
+    assert phone["confidence_vocabulary"] != "verified"
+    assert phone["best_evidence_document_id"] == run["source_document_id"]
+
+    page = client.get(f"/entities/{acme['id']}")
+    assert "I independently verified this value" in page.text

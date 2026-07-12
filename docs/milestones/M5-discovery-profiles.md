@@ -22,9 +22,12 @@ profile field exposes evidence + confidence · missing stays missing · conflict
    source said, tied to a SourceDocument + row/page location) and `fact_assertion` (what
    we conclude) are separate tables. One assertion per (entity, predicate), updated in
    place with `rule_version`; history lives in observations, which are never overwritten.
+   Profile reads compare assertion evidence sets with the current M4 merge group and
+   reconcile only when needed, so merge/reversal cannot expose stale absorbed facts.
 3. **Confidence is deterministic, field-level, and inspectable** (§17.2): multiplicative
    composition of authority × extraction × match × freshness × corroboration ×
-   contradiction, every component stored on the assertion. Freshness half-lives vary by
+   contradiction, every component stored on the assertion. Manual entry is explicitly
+   separate from human verification (`human_verified`, verifier, timestamp). Freshness half-lives vary by
    predicate (§17.4, table in `confidence.py`). Corroboration counts **distinct
    sources** only (same-source repeats don't corroborate; full lineage-independence
    deferred to M7 story clustering, noted). Numeric + §17.7 vocabulary both exposed.
@@ -43,21 +46,27 @@ profile field exposes evidence + confidence · missing stays missing · conflict
    evidenced (independent source) → repeatedly-evidenced (≥3 evidence refs, ≥2 sources)
    → verified (human) · historical/uncertain/contradicted by evidence age and conflict.
 8. **Discovery = bulk dataset import + dedupe funnel** (§9.2, §12.2, MVP "≥1 official
-   dataset import"): CSV/CSV-in-ZIP upload with a column mapping, full import
+   dataset import"): bounded CSV/one-CSV-in-ZIP upload with a column mapping, full import
    provenance (`bulk_import_run`: publisher, version, coverage date, licence note,
    checksum, mapping, rejected rows), the raw file preserved as a SourceDocument under
    a dedicated bulk-imports SourceDefinition. Rows become observations → find-or-create
-   organisations (identifier match first, then exact name+locality) → reconciled facts →
+   organisations (identifier match first, then exact name+locality+country only when all
+   are present) → reconciled facts →
    `entities.match_scan` queued so duplicates land in the M4 resolution queue.
-   **Scope-aware**: rows outside `scopes.active_scope()` geography are skipped and
-   counted, honouring the M5+ scope rule.
+   **Scope-aware and reproducible**: the active scope is snapshotted when queued and rows
+   outside that immutable snapshot are skipped and counted. User datasets default to
+   conservative authority tier 5; higher authority is an explicit, audited declaration.
+   Optional pack-mapped service/archetype columns populate evidence-linked
+   classifications and capability ladders.
 9. **Profile is the M4 entity page grown into a workspace** (§18): identity + duplicate
    warnings (M4), commercial summary (classifications, capabilities, size bands, tier),
    evidence summary per fact (value, confidence vocab + components, freshness, source
    count, contradiction count, best-evidence link into the existing evidence viewer),
-   research gaps with resolve/dismiss. Contacts already ship with M4.
+   research gaps with resolve/dismiss. Identity, classification, capability, and sizing
+   sections expose confidence and evidence-document links. Manual observations require an
+   existing evidence document and are not verified unless the user explicitly confirms.
 
-## Schema (migration 0014)
+## Schema (migrations 0015 + hardening 0016)
 
 `observation` · `fact_assertion` (unique entity+predicate; component scores; supporting/
 contradicting observation id lists) · `classification_assignment` (pack_id + taxonomy_id
@@ -65,7 +74,8 @@ contradicting observation id lists) · `classification_assignment` (pack_id + ta
 `capability_assignment` · `size_estimate` (one per organisation × concept: legal entity /
 operating group / local branch / capability tier / commercial sophistication /
 procurement sophistication / outsourcing need) · `research_question` ·
-`bulk_import_run`.
+`bulk_import_run` (including scope + authority snapshots). Migration 0016 also adds
+explicit verification metadata to `observation`.
 
 ## Module map (packages/intelligence)
 
@@ -88,7 +98,16 @@ procurement sophistication / outsourcing need) · `research_question` ·
 
 | Acceptance | Test |
 |---|---|
-| regional population discovered + profiled | `test_discovery_import.py`: CSV → organisations, identifiers, observations, facts, provenance chain, scope filter, dedupe scan queued |
-| every field exposes evidence + confidence | `test_profile.py`: each fact carries confidence components, vocab, observation → document links |
+| regional population discovered + profiled | `test_discovery_import.py`: CSV/ZIP → organisations, identifiers, observations, facts, pack classifications/capabilities, immutable scope filter, dedupe scan queued |
+| every field exposes evidence + confidence | `test_intelligence_profile.py` + `test_m5_api.py`: fact components and identity/commercial/size observation → document links |
 | missing stays missing | no-observation predicates absent/unknown; size `unresolved`; gap generated instead |
 | conflicts visible | contradicting observations preserved, `conflicted` status, contradiction count in profile, research question spawned |
+
+## Hardening audit (2026-07-12)
+
+Adversarial tests cover precomputed facts across merge/reversal, ambiguous same-name
+companies with incomplete geography, import failure persistence, queued-scope drift,
+conservative/declared authority, full-name region normalisation, pack claim ingestion,
+manual-entry versus verification, evidence links, ZIP ambiguity, and populated 0015 ↔
+0016 migration round trips. Reconciliation also proves that independently repeated weak
+directories cannot outvote a primary authority, while preserving the disagreement.

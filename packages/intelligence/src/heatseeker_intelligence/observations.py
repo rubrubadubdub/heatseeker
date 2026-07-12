@@ -3,6 +3,7 @@
 import json
 from datetime import datetime
 
+from heatseeker_common.timeutil import utc_now
 from heatseeker_source_registry.models import SourceDocument
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -42,6 +43,8 @@ def record_observation(
     source_location: dict | None = None,
     observed_at: datetime | None = None,
     normalisation_status: str = NormalisationStatus.NORMALISED,
+    human_verified: bool = False,
+    verified_by: str | None = None,
 ) -> Observation:
     if not predicate.strip():
         raise ValueError("observation predicate must not be blank")
@@ -54,6 +57,9 @@ def record_observation(
         extraction_method=extraction_method,
         extraction_confidence=max(0.0, min(1.0, extraction_confidence)),
         normalisation_status=normalisation_status,
+        human_verified=human_verified,
+        verified_by=verified_by if human_verified else None,
+        verified_at=utc_now() if human_verified else None,
     )
     if observed_at is not None:
         observation.observed_at = observed_at

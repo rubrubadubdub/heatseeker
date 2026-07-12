@@ -5,7 +5,7 @@ from datetime import timedelta
 from heatseeker_common.db import session_scope
 from heatseeker_common.timeutil import utc_now
 from heatseeker_entity_resolution import entities
-from heatseeker_entity_resolution.resolution import perform_merge
+from heatseeker_entity_resolution.resolution import perform_merge, reverse_merge
 from heatseeker_intelligence import confidence as conf
 from heatseeker_intelligence import facts
 from heatseeker_intelligence.models import ExtractionMethod, FactStatus
@@ -133,6 +133,40 @@ def test_contradiction_is_preserved_and_flagged(engine):
         assert assertion.contradiction_score < 1.0
 
 
+def test_primary_authority_is_not_outvoted_by_multiple_weak_directories(engine):
+    with session_scope(engine) as session:
+        org = entities.create_organisation(session, "Acme Scaffolding")
+        registry = make_document(
+            session,
+            make_source(session, "Official registry", category="government_registry", tier=1),
+        )
+        record_observation(
+            session,
+            registry,
+            "registration_status",
+            "active",
+            subject_entity_id=org.id,
+        )
+        for index in range(2):
+            directory = make_document(
+                session,
+                make_source(session, f"Directory {index}", category="directory", tier=7),
+                f"directory-{index}",
+            )
+            record_observation(
+                session,
+                directory,
+                "registration_status",
+                "inactive",
+                subject_entity_id=org.id,
+            )
+
+        assertion = facts.reconcile(session, org.id, "registration_status")
+        assert assertion.value == "active"
+        assert assertion.status == FactStatus.CONFLICTED
+        assert len(assertion.contradicting_observation_ids) == 2
+
+
 def test_stale_facts_are_flagged(engine):
     with session_scope(engine) as session:
         org = entities.create_organisation(session, "Acme Scaffolding")
@@ -162,10 +196,30 @@ def test_manual_observation_counts_as_verified(engine):
             subject_entity_id=org.id,
             extraction_method=ExtractionMethod.MANUAL,
             extraction_confidence=1.0,
+            human_verified=True,
+            verified_by="tester",
         )
         assertion = facts.reconcile(session, org.id, "canonical_name")
         assert assertion.status == FactStatus.CONFIRMED
         assert assertion.confidence_vocabulary == "verified"
+
+
+def test_manual_observation_is_not_verified_without_explicit_confirmation(engine):
+    with session_scope(engine) as session:
+        org = entities.create_organisation(session, "Acme Scaffolding")
+        document = make_document(session, make_source(session, "Manual", category="manual"))
+        record_observation(
+            session,
+            document,
+            "canonical_name",
+            "Acme Scaffolding",
+            subject_entity_id=org.id,
+            extraction_method=ExtractionMethod.MANUAL,
+            extraction_confidence=1.0,
+        )
+        assertion = facts.reconcile(session, org.id, "canonical_name")
+        assert assertion.confidence_vocabulary != "verified"
+        assert assertion.status != FactStatus.CONFIRMED
 
 
 def test_reconcile_spans_merge_group(engine):
@@ -181,3 +235,49 @@ def test_reconcile_spans_merge_group(engine):
         # Evidence recorded against the absorbed record still feeds the canonical fact.
         assert assertion is not None
         assert assertion.subject_entity_id == survivor.id
+
+
+def test_precomputed_facts_remain_canonical_across_merge_and_reversal(engine):
+    from heatseeker_intelligence import profile
+
+    with session_scope(engine) as session:
+        survivor = entities.create_organisation(session, "Acme Scaffolding Pty Ltd")
+        absorbed = entities.create_organisation(session, "Acme Scaffold Hire")
+        record_observation(
+            session,
+            make_document(session, make_source(session, "Source A"), "a"),
+            "phone",
+            "111",
+            subject_entity_id=survivor.id,
+        )
+        record_observation(
+            session,
+            make_document(session, make_source(session, "Source B"), "b"),
+            "phone",
+            "222",
+            subject_entity_id=absorbed.id,
+        )
+        facts.reconcile(session, survivor.id, "phone")
+        facts.reconcile(session, absorbed.id, "phone")
+        merge = perform_merge(session, survivor.id, absorbed.id, rationale="duplicate")
+
+        merged = profile.assemble(session, survivor.id)
+        phone_rows = [fact for fact in merged["facts"] if fact["predicate"] == "phone"]
+        assert len(phone_rows) == 1
+        assert phone_rows[0]["status"] == FactStatus.CONFLICTED
+
+        reverse_merge(session, merge.id, reason="not duplicates", performed_by="tester")
+        survivor_profile = profile.assemble(session, survivor.id)
+        absorbed_profile = profile.assemble(session, absorbed.id)
+        survivor_phones = [
+            fact["value"]
+            for fact in survivor_profile["facts"]
+            if fact["predicate"] == "phone"
+        ]
+        absorbed_phones = [
+            fact["value"]
+            for fact in absorbed_profile["facts"]
+            if fact["predicate"] == "phone"
+        ]
+        assert survivor_phones == ["111"]
+        assert absorbed_phones == ["222"]

@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from heatseeker_common.db import session_scope
+from heatseeker_industry_packs.loader import discover_packs
 from heatseeker_intelligence.discovery import MappingSpec, create_import_run, list_runs
 from heatseeker_source_registry.scopes import active_scope
 
@@ -29,6 +30,8 @@ _COLUMN_FIELDS = (
     ("region", "State/region column", False),
     ("postcode", "Postcode column", False),
     ("employees_band", "Employee band column", False),
+    ("service_claim", "Service ID column (optional, pack vocabulary)", False),
+    ("archetype_claim", "Archetype ID column (optional, pack vocabulary)", False),
 )
 
 
@@ -44,6 +47,7 @@ def discovery_page(request: Request):
             runs=runs,
             scope=scope,
             column_fields=_COLUMN_FIELDS,
+            pack_ids=[path.name for path in discover_packs()],
             run_status_badges=RUN_STATUS_BADGES,
         )
 
@@ -57,6 +61,8 @@ async def discovery_import(
     dataset_version: Annotated[str, Form()] = "",
     coverage_date: Annotated[str, Form()] = "",
     licence_note: Annotated[str, Form()] = "",
+    authority_tier: Annotated[int, Form()] = 5,
+    pack_id: Annotated[str, Form()] = "",
     identifier_scheme: Annotated[str, Form()] = "abn",
     country: Annotated[str, Form()] = "",
     col_name: Annotated[str, Form()] = "",
@@ -68,10 +74,17 @@ async def discovery_import(
     col_region: Annotated[str, Form()] = "",
     col_postcode: Annotated[str, Form()] = "",
     col_employees_band: Annotated[str, Form()] = "",
+    col_service_claim: Annotated[str, Form()] = "",
+    col_archetype_claim: Annotated[str, Form()] = "",
 ):
     engine = request.app.state.engine
     settings = request.app.state.settings
-    content = await dataset_file.read()
+    upload_limit = settings.evidence_upload_max_bytes
+    content = await dataset_file.read(upload_limit + 1)
+    if len(content) > upload_limit:
+        return _redirect(
+            "/discovery", f"Dataset exceeds {upload_limit:,} compressed bytes", "danger"
+        )
 
     columns = {
         field_name: value.strip()
@@ -85,6 +98,8 @@ async def discovery_import(
             ("region", col_region),
             ("postcode", col_postcode),
             ("employees_band", col_employees_band),
+            ("service_claim", col_service_claim),
+            ("archetype_claim", col_archetype_claim),
         )
         if value.strip()
     }
@@ -93,6 +108,8 @@ async def discovery_import(
         constants["identifier_scheme"] = identifier_scheme.strip().lower()
     if country.strip():
         constants["country"] = country.strip().upper()
+    if pack_id.strip():
+        constants["pack_id"] = pack_id.strip()
 
     try:
         mapping = MappingSpec(columns=columns, constants=constants)
@@ -109,6 +126,7 @@ async def discovery_import(
                 coverage_date=coverage_date,
                 licence_note=licence_note,
                 actor="user",
+                authority_tier=authority_tier,
             )
             dataset = run.dataset_name
     except ValueError as exc:

@@ -11,11 +11,12 @@ from heatseeker_source_registry.models import SourceDocument
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from heatseeker_intelligence import confidence as confidence_module
 from heatseeker_intelligence.capabilities import capabilities_for
 from heatseeker_intelligence.classifications import classifications_for
-from heatseeker_intelligence.facts import assertions_for
+from heatseeker_intelligence.facts import NON_ASSERTION_PREDICATES, assertions_for
 from heatseeker_intelligence.gaps import open_questions
-from heatseeker_intelligence.models import FactStatus
+from heatseeker_intelligence.models import FactStatus, Observation
 from heatseeker_intelligence.sizing import estimates_for
 
 
@@ -35,6 +36,31 @@ def _duplicate_warnings(session: Session, entity_ids: list[str]) -> list[EntityM
     )
 
 
+def _facts_are_current(session: Session, canonical_id: str, group_ids: list[str]) -> bool:
+    observation_rows = session.execute(
+        select(Observation.id, Observation.predicate).where(
+            Observation.subject_entity_id.in_(group_ids),
+            Observation.normalisation_status != "rejected",
+            Observation.predicate.not_in(NON_ASSERTION_PREDICATES),
+        )
+    ).all()
+    expected: dict[str, set[str]] = {}
+    for observation_id, predicate in observation_rows:
+        expected.setdefault(predicate, set()).add(observation_id)
+    assertions = assertions_for(session, canonical_id)
+    if {assertion.predicate for assertion in assertions} != set(expected):
+        return False
+    return all(
+        assertion.rule_version == confidence_module.RULE_VERSION
+        and (
+            set(assertion.supporting_observation_ids)
+            | set(assertion.contradicting_observation_ids)
+        )
+        == expected[assertion.predicate]
+        for assertion in assertions
+    )
+
+
 def assemble(session: Session, organisation_id: str) -> dict:
     """Full profile for one organisation, aggregated across its merge group."""
     identity = group_profile(session, organisation_id)
@@ -42,10 +68,44 @@ def assemble(session: Session, organisation_id: str) -> dict:
     group_ids = [o.id for o in group]
     canonical = identity["canonical"]
 
+    # Derived records are caches over immutable observations. Reconcile only when their
+    # evidence set changed (including M4 merge/reversal), avoiding write churn on reads.
+    if not _facts_are_current(session, canonical.id, group_ids):
+        from heatseeker_intelligence import facts as facts_module
+
+        facts_module.reconcile_all(session, canonical.id)
+    from heatseeker_intelligence import gaps, sizing
+
+    sizing.estimate_sizes(session, canonical.id)
+    gaps.generate_for(session, canonical.id)
+
     assertions = assertions_for(session, canonical.id)
+    classification_rows = classifications_for(session, group_ids)
+    capability_rows = capabilities_for(session, group_ids)
+    size_rows = estimates_for(session, group_ids)
+    evidence_observation_ids = {
+        observation_id
+        for assignment in classification_rows
+        for observation_id in assignment.evidence_ids
+    }
+    evidence_observation_ids.update(
+        entry.get("observation_id")
+        for capability in capability_rows
+        for entry in capability.evidence_ids
+        if isinstance(entry, dict) and entry.get("observation_id")
+    )
+    evidence_observations = {
+        observation.id: observation
+        for observation in session.execute(
+            select(Observation).where(Observation.id.in_(evidence_observation_ids))
+        ).scalars()
+    }
     document_ids = {
         a.best_evidence_document_id for a in assertions if a.best_evidence_document_id
     }
+    document_ids.update(
+        observation.source_document_id for observation in evidence_observations.values()
+    )
     documents = {
         d.id: d
         for d in session.execute(
@@ -79,19 +139,56 @@ def assemble(session: Session, organisation_id: str) -> dict:
     ]
 
     conflicts = [f for f in facts if f["status"] == FactStatus.CONFLICTED]
-    capability_rows = capabilities_for(session, group_ids)
+    evidence_document_by_observation = {
+        observation_id: documents.get(observation.source_document_id)
+        for observation_id, observation in evidence_observations.items()
+    }
+    classification_evidence = {
+        assignment.id: [
+            evidence_document_by_observation[observation_id]
+            for observation_id in assignment.evidence_ids
+            if evidence_document_by_observation.get(observation_id) is not None
+        ]
+        for assignment in classification_rows
+    }
+    capability_evidence = {
+        capability.id: [
+            evidence_document_by_observation[entry["observation_id"]]
+            for entry in capability.evidence_ids
+            if isinstance(entry, dict)
+            and evidence_document_by_observation.get(entry.get("observation_id")) is not None
+        ]
+        for capability in capability_rows
+    }
+    fact_documents = {
+        assertion.id: documents.get(assertion.best_evidence_document_id)
+        for assertion in assertions
+        if assertion.best_evidence_document_id
+    }
+    size_evidence = {
+        estimate.id: [
+            fact_documents[basis["fact_assertion_id"]]
+            for basis in estimate.basis
+            if basis.get("fact_assertion_id") in fact_documents
+        ]
+        for estimate in size_rows
+    }
 
     return {
         "identity": identity,
         "duplicate_warnings": _duplicate_warnings(session, group_ids),
         "facts": facts,
         "conflicts": conflicts,
-        "classifications": classifications_for(session, group_ids),
+        "classifications": classification_rows,
+        "classification_evidence": classification_evidence,
         "capabilities": capability_rows,
+        "capability_evidence": capability_evidence,
         "contradicted_capabilities": [
             c for c in capability_rows if c.capability_status == "contradicted"
         ],
-        "size_estimates": estimates_for(session, group_ids),
+        "size_estimates": size_rows,
+        "size_evidence": size_evidence,
+        "fact_by_predicate": {fact["predicate"]: fact for fact in facts},
         "research_questions": open_questions(session, group_ids),
     }
 

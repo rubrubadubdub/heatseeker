@@ -43,6 +43,13 @@ def _upsert(
     if estimate is None:
         estimate = SizeEstimate(organisation_id=organisation_id, concept=concept)
         session.add(estimate)
+    elif (
+        estimate.band == band
+        and estimate.basis == basis
+        and estimate.confidence == round(confidence, 3)
+        and estimate.rule_version == SIZING_RULE_VERSION
+    ):
+        return estimate
     estimate.band = band
     estimate.basis = basis
     estimate.confidence = round(confidence, 3)
@@ -52,10 +59,10 @@ def _upsert(
     return estimate
 
 
-def _employee_fact(session: Session, entity_ids: list[str]) -> FactAssertion | None:
+def _employee_fact(session: Session, entity_id: str) -> FactAssertion | None:
     return session.execute(
         select(FactAssertion).where(
-            FactAssertion.subject_entity_id.in_(entity_ids),
+            FactAssertion.subject_entity_id == entity_id,
             FactAssertion.predicate == PREDICATE_EMPLOYEES,
             FactAssertion.status.not_in(["disproven", "unknown"]),
         )
@@ -71,7 +78,7 @@ def estimate_sizes(session: Session, organisation_id: str) -> dict[str, SizeEsti
     estimates: dict[str, SizeEstimate] = {}
 
     # Legal-entity size: employee band evidence or nothing.
-    employee_fact = _employee_fact(session, group_ids)
+    employee_fact = _employee_fact(session, canonical.id)
     if employee_fact is not None and employee_fact.value in EMPLOYEE_BANDS:
         estimates[SizeConcept.LEGAL_ENTITY_SIZE] = _upsert(
             session,
@@ -182,10 +189,12 @@ def estimate_sizes(session: Session, organisation_id: str) -> dict[str, SizeEsti
 
 
 def estimates_for(session: Session, entity_ids: list[str]) -> list[SizeEstimate]:
+    if not entity_ids:
+        return []
     return list(
         session.execute(
             select(SizeEstimate)
-            .where(SizeEstimate.organisation_id.in_(entity_ids))
+            .where(SizeEstimate.organisation_id == entity_ids[0])
             .order_by(SizeEstimate.concept)
         ).scalars()
     )
