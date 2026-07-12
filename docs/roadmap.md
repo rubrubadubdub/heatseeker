@@ -17,6 +17,7 @@ detail: read the spec section for the milestone via
 | — | Research scopes (tunable geo targeting: ANZ/APAC/custom states+cities) | **Done** (2026-07-11; regions-as-data + exclusions added same day, ADR-0012) | see M2 brief | M5+ must consume `scopes.active_scope()` |
 | — | M2 robustness: grading, auto-deprecation, politeness, distillation (ADR-0011) | **Done** (2026-07-11) | see M2 brief | 98 tests green |
 | M3 | Responsible crawler | **Done** (2026-07-11, acceptance verified) | [M3-crawler.md](milestones/M3-crawler.md) | Incl. transitive backlink discovery (vocabulary-gated proposals) |
+| — | Document & evidence processing pipeline (PDF/OOXML/image extraction, HTML reference + publication-date extraction, manual evidence) | **Done** (2026-07-12) | see M2/M3 briefs | Migration 0011; versioned runs per (pipeline_version, config_hash); OCR/vision toggles exist but stay off until a provider lands (see gaps) |
 | M4 | Entity core & resolution | Not started | — | |
 | M5 | Company discovery & profile | Not started | — | |
 | M6 | Projects, relationships, graph | Not started | — | |
@@ -110,9 +111,8 @@ improve workflows.
 | Structured API adapters (ABR/ASIC/NZBN keys, params, pagination) | Official registries are the backbone of company facts; plain GET only reaches their homepages | M4/M5 (entity ingestion) |
 | Bulk dataset import (CSV/XLSX/Parquet, spec §12.2) | MVP requires ≥1 official dataset import | M4/M5 |
 | RSS/Atom per-entry parsing (feeds stored as one XML doc today) | News/story clustering needs per-article documents | M7 (or earlier) |
-| PDF pipeline (spec §12.3) | Capability statements/tenders are PDFs | M5 |
 | Autopilot-scheduled crawls (crawls are on-demand) | Needs a cadence policy to avoid 21 sites × every tick | short follow-up |
-| Publication-date extraction (`claimed_published_at` exists but no collector populates it) | Freshness weighting (§17.4) needs the content's own date, not just our fetch date — a 1979 guideline fetched today looks "fresh" without it | M4/M5 (extract from meta/JSON-LD/RSS at distillation) |
+| OCR/vision extraction (`evidence_ocr_enabled`/`evidence_vision_enabled` exist, default off, no provider wired) | Scanned PDFs and images carry text the native extractors can't reach; runs record OCR as disabled/unavailable rather than pretending | M11 (AI providers) |
 | JS rendering (Playwright, permitted-only) | JS-only sites yield little today | when a real source needs it |
 | AI pass-2 source vetting + terms interpretation | Funnel pass 2 | M11 |
 
