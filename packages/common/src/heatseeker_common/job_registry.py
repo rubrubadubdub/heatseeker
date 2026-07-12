@@ -13,6 +13,10 @@ class PermanentJobError(RuntimeError):
     """A deterministic payload/entity error that must not be retried."""
 
 
+class JobCancelled(RuntimeError):
+    """A running handler cooperatively stopped after cancellation was requested."""
+
+
 @dataclass
 class JobContext:
     job_id: str

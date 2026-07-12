@@ -15,7 +15,7 @@ from heatseeker_common.health import check_health
 from heatseeker_common.settings import Settings, get_settings
 from heatseeker_source_registry.regions import load_regions_if_available
 
-from heatseeker_api import api_entities, api_routes, ui_entities, ui_routes, ui_sources
+from heatseeker_api import api_entities, api_routes, ui_ai, ui_entities, ui_routes, ui_sources
 
 logger = logging.getLogger("heatseeker.api")
 
@@ -34,6 +34,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
     app.include_router(api_routes.router)
     app.include_router(api_entities.router)
+    app.include_router(ui_ai.router)
     app.include_router(ui_sources.router)
     app.include_router(ui_entities.router)
     app.include_router(ui_routes.router)

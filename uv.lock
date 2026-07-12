@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "heatseeker",
+    "heatseeker-ai",
     "heatseeker-api",
     "heatseeker-cli",
     "heatseeker-common",
@@ -193,6 +194,7 @@ name = "heatseeker"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "heatseeker-ai" },
     { name = "heatseeker-api" },
     { name = "heatseeker-cli" },
     { name = "heatseeker-common" },
@@ -212,6 +214,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "heatseeker-ai", editable = "packages/ai" },
     { name = "heatseeker-api", editable = "applications/api" },
     { name = "heatseeker-cli", editable = "applications/cli" },
     { name = "heatseeker-common", editable = "packages/common" },
@@ -230,11 +233,29 @@ dev = [
 ]
 
 [[package]]
+name = "heatseeker-ai"
+version = "0.1.0"
+source = { editable = "packages/ai" }
+dependencies = [
+    { name = "heatseeker-common" },
+    { name = "heatseeker-source-registry" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "heatseeker-common", editable = "packages/common" },
+    { name = "heatseeker-source-registry", editable = "packages/source_registry" },
+    { name = "pydantic", specifier = ">=2.7" },
+]
+
+[[package]]
 name = "heatseeker-api"
 version = "0.1.0"
 source = { editable = "applications/api" }
 dependencies = [
     { name = "fastapi" },
+    { name = "heatseeker-ai" },
     { name = "heatseeker-common" },
     { name = "heatseeker-core-domain" },
     { name = "heatseeker-entity-resolution" },
@@ -248,6 +269,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.111" },
+    { name = "heatseeker-ai", editable = "packages/ai" },
     { name = "heatseeker-common", editable = "packages/common" },
     { name = "heatseeker-core-domain", editable = "packages/core_domain" },
     { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
@@ -379,6 +401,7 @@ name = "heatseeker-worker"
 version = "0.1.0"
 source = { editable = "applications/worker" }
 dependencies = [
+    { name = "heatseeker-ai" },
     { name = "heatseeker-common" },
     { name = "heatseeker-entity-resolution" },
     { name = "heatseeker-industry-packs" },
@@ -387,6 +410,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "heatseeker-ai", editable = "packages/ai" },
     { name = "heatseeker-common", editable = "packages/common" },
     { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },

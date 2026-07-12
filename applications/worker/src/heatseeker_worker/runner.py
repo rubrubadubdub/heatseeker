@@ -9,7 +9,7 @@ import traceback
 
 from heatseeker_common import jobs
 from heatseeker_common.db import create_db_engine, session_scope
-from heatseeker_common.job_registry import JobContext, PermanentJobError, get_handler
+from heatseeker_common.job_registry import JobCancelled, JobContext, PermanentJobError, get_handler
 from heatseeker_common.models import WorkerRegistration
 from heatseeker_common.settings import Settings
 from heatseeker_common.timeutil import utc_now
@@ -87,6 +87,14 @@ class WorkerRunner:
         if reaped:
             logger.warning("reaped stale jobs", extra={"count": reaped})
 
+    def maybe_enqueue_source_scouts(self) -> int:
+        if not self.settings.ai_enabled:
+            return 0
+        from heatseeker_ai.service import enqueue_due_plans
+
+        with session_scope(self.engine) as session:
+            return enqueue_due_plans(session)
+
     def run(
         self,
         once: bool = False,
@@ -108,6 +116,7 @@ class WorkerRunner:
         executed = 0
         last_heartbeat = time.monotonic()
         last_autopilot = 0.0  # fire on first pass so a fresh install starts collecting
+        last_scout_schedule = 0.0
         logger.info("worker started", extra={"worker_id": self.worker_id})
         try:
             while not (stop_event and stop_event.is_set()):
@@ -121,6 +130,14 @@ class WorkerRunner:
                     if self.maybe_enqueue_autopilot():
                         logger.info("autopilot tick enqueued")
                     last_autopilot = time.monotonic()
+                if not once and (
+                    time.monotonic() - last_scout_schedule
+                    >= self.settings.ai_scout_scheduler_interval_seconds
+                ):
+                    scheduled = self.maybe_enqueue_source_scouts()
+                    if scheduled:
+                        logger.info("source-scout runs enqueued", extra={"count": scheduled})
+                    last_scout_schedule = time.monotonic()
 
                 with session_scope(self.engine) as session:
                     job = jobs.claim_next(session, self.worker_id)
@@ -211,6 +228,10 @@ class WorkerRunner:
         heartbeat_thread.start()
         try:
             result = handler(ctx)
+        except JobCancelled as exc:
+            with session_scope(self.engine) as session:
+                jobs.mark_cancelled(session, job_id, str(exc))
+            logger.info("job cancelled cooperatively", extra={"job_id": job_id})
         except PermanentJobError:
             error = traceback.format_exc()
             with session_scope(self.engine) as session:

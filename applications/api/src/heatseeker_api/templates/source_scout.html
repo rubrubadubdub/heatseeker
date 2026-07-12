@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Source Scout · Heatseeker{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3 gap-3">
+  <div>
+    <h1 class="h3 mb-1">Source Scout</h1>
+    <p class="text-secondary mb-0">Give a bounded Codex or Claude researcher a scope, search brief, budget, and activation policy.</p>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  {% for health in provider_health %}
+  <div class="col-md-4">
+    <div class="card h-100 border-{{ 'success' if health.installed and health.authenticated else 'warning' }}">
+      <div class="card-body py-3">
+        <div class="d-flex justify-content-between"><strong>{{ health.provider }}</strong>
+          <span class="badge text-bg-{{ 'success' if health.installed and health.authenticated else 'warning' }}">
+            {{ 'ready' if health.installed and health.authenticated else ('sign in' if health.installed else 'missing') }}
+          </span>
+        </div>
+        <div class="small text-secondary mt-2">{{ health.version or health.detail }}</div>
+        {% if health.installed and not health.authenticated %}<div class="small mt-1 mono">{{ health.detail }}</div>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<details class="card mb-4" open>
+  <summary class="card-header fw-semibold">Create a scout plan</summary>
+  <div class="card-body">
+    <form method="post" action="/source-scout/plans" class="row g-3">
+      <div class="col-md-4"><label class="form-label">Plan name</label><input class="form-control" name="name" required maxlength="200"></div>
+      <div class="col-md-4"><label class="form-label">Provider</label><select class="form-select" name="provider"><option>codex</option><option>claude</option><option>disabled</option></select></div>
+      <div class="col-md-4"><label class="form-label">Model</label><input class="form-control mono" name="model" placeholder="blank = provider default"></div>
+      <div class="col-md-4"><label class="form-label">Research scope</label><select class="form-select" name="scope_id"><option value="">No named scope</option>{% for scope in scopes %}<option value="{{ scope.id }}">{{ scope.name }}{{ ' (active)' if scope.is_active }}</option>{% endfor %}</select></div>
+      <div class="col-md-4"><label class="form-label">Keywords</label><textarea class="form-control" name="keywords" rows="2" placeholder="scaffolding, temporary works"></textarea></div>
+      <div class="col-md-4"><label class="form-label">Excluded terms</label><textarea class="form-control" name="excluded_terms" rows="2"></textarea></div>
+      <div class="col-md-4"><label class="form-label">Wanted source categories</label><input class="form-control" name="source_categories" placeholder="official_register, trade_association, tender_portal"></div>
+      <div class="col-md-4"><label class="form-label">Allowed domains</label><input class="form-control" name="allowed_domains" placeholder="optional allow-list"></div>
+      <div class="col-md-4"><label class="form-label">Blocked domains</label><input class="form-control" name="blocked_domains"></div>
+      <div class="col-md-4"><label class="form-label">Languages</label><input class="form-control" name="languages" placeholder="English"></div>
+      <div class="col-md-4"><label class="form-label">Minimum confidence</label><input class="form-control" type="number" step="0.05" name="min_confidence" min="0" max="1" value="0.65"></div>
+      <div class="col-md-8"><label class="form-label">Preseed instructions</label><textarea class="form-control" name="instructions" rows="3" maxlength="20000" placeholder="Research priorities and useful niche context. Immutable safety rules still win."></textarea></div>
+      <div class="col-md-4"><label class="form-label">Description</label><textarea class="form-control" name="description" rows="3"></textarea></div>
+      <div class="col-6 col-md-2"><label class="form-label">Candidates</label><input class="form-control" type="number" name="max_candidates" min="1" max="200" value="{{ default_budgets.max_candidates }}"></div>
+      <div class="col-6 col-md-2"><label class="form-label">Agent turns</label><input class="form-control" type="number" name="max_turns" min="1" max="30" value="{{ default_budgets.max_turns }}"></div>
+      <div class="col-6 col-md-2"><label class="form-label">Max USD</label><input class="form-control" type="number" step="0.01" name="max_budget_usd" min="0.01" max="100" value="{{ default_budgets.max_budget_usd }}"></div>
+      <div class="col-6 col-md-2"><label class="form-label">Timeout seconds</label><input class="form-control" type="number" name="timeout_seconds" min="10" max="3600" value="{{ default_budgets.timeout_seconds }}"></div>
+      <div class="col-md-4"><label class="form-label">After discovery</label><select class="form-select" name="activation_mode"><option value="proposal_only">Queue proposals for review</option><option value="auto_activate">Auto-activate policy-cleared sources and crawl</option></select></div>
+      <div class="col-md-3 form-check ms-2"><input class="form-check-input" type="checkbox" name="schedule_enabled" value="true" id="schedule"><label class="form-check-label" for="schedule">Run repeatedly</label></div>
+      <div class="col-md-3"><label class="form-label">Interval minutes</label><input class="form-control" type="number" name="interval_minutes" min="5" value="1440"></div>
+      <div class="col-12"><div class="alert alert-warning py-2 small mb-2">Auto-activate is an explicit unattended-collection authorization. Robots and prohibited-terms gates still apply; every action remains audited.</div><button class="btn btn-primary">Create plan</button></div>
+    </form>
+  </div>
+</details>
+
+<h2 class="h5">Plans</h2>
+<div class="table-responsive mb-4"><table class="table table-sm align-middle"><thead><tr><th>plan</th><th>provider</th><th>scope</th><th>mode</th><th>schedule</th><th>actions</th></tr></thead><tbody>
+{% for plan in plans %}<tr class="{{ 'opacity-50' if not plan.is_enabled }}"><td><strong>{{ plan.name }}</strong><div class="small text-secondary">{{ plan.description or '' }}</div></td><td>{{ plan.provider }}<div class="small mono">{{ plan.model or 'default' }}</div></td><td class="mono">{{ plan.scope_id[:8] if plan.scope_id else 'none' }}</td><td>{{ plan.activation_mode }}</td><td>{% if plan.schedule_enabled %}every {{ plan.interval_minutes }}m<div class="small">next {{ plan.next_run_at }}</div>{% else %}manual{% endif %}</td><td><div class="d-flex gap-1"><form method="post" action="/source-scout/plans/{{ plan.id }}/run"><button class="btn btn-sm btn-primary" {{ 'disabled' if not plan.is_enabled }}>Run now</button></form><form method="post" action="/source-scout/plans/{{ plan.id }}/toggle"><button class="btn btn-sm btn-outline-secondary">{{ 'disable' if plan.is_enabled else 'enable' }}</button></form></div></td></tr>
+{% else %}<tr><td colspan="6" class="text-secondary">No source-scout plans yet.</td></tr>{% endfor %}
+</tbody></table></div>
+
+<h2 class="h5">Recent runs</h2>
+<div class="table-responsive mb-4"><table class="table table-sm"><thead><tr><th>run</th><th>plan</th><th>provider</th><th>status</th><th>results</th><th>started</th></tr></thead><tbody>
+{% for run in runs %}<tr><td><a class="mono" href="/source-scout/runs/{{ run.id }}">{{ run.id[:8] }}</a></td><td>{{ run.plan.name }}</td><td>{{ run.provider }}</td><td><span class="badge text-bg-{{ status_badges.get(run.status, 'secondary') }}">{{ run.status }}</span></td><td class="small">{{ run.counters | tojson }}</td><td class="small">{{ run.started_at or run.created_at }}</td></tr>
+{% else %}<tr><td colspan="6" class="text-secondary">No runs yet.</td></tr>{% endfor %}
+</tbody></table></div>
+
+<h2 class="h5">Proposal review</h2>
+<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>candidate</th><th>category</th><th>confidence</th><th>reasoning</th><th>actions</th></tr></thead><tbody>
+{% for p in proposals %}<tr><td><a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.name }}</a><div class="small mono text-break">{{ p.url }}</div></td><td>{{ p.source_category }}</td><td>{{ '%.2f' | format(p.confidence) }}</td><td class="small" style="max-width:30rem">{{ p.reasoning }}</td><td><div class="d-flex gap-1"><form method="post" action="/source-scout/proposals/{{ p.id }}/activate"><button class="btn btn-sm btn-success">Policy-check + activate</button></form><form method="post" action="/source-scout/proposals/{{ p.id }}/reject"><button class="btn btn-sm btn-outline-danger">Reject</button></form></div></td></tr>
+{% else %}<tr><td colspan="5" class="text-secondary">No proposals waiting for review.</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

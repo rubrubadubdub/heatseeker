@@ -1,4 +1,5 @@
 from alembic import context
+from heatseeker_ai.models import *  # noqa: F403 — register AI tables
 from heatseeker_common.db import Base
 from heatseeker_common.models import *  # noqa: F403 — register tables on Base.metadata
 from heatseeker_common.settings import Settings

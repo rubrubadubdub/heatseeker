@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     # provider is configured; metadata-only processing must continue to work.
     evidence_ocr_enabled: bool = False
     evidence_vision_enabled: bool = False
+    # Agentic source scouting. Commands are executable names/paths only; arguments are
+    # assembled by the provider adapters and prompts are always supplied over stdin.
+    ai_enabled: bool = True
+    ai_codex_command: str = "codex"
+    ai_claude_command: str = "claude"
+    ai_scout_timeout_seconds: float = 900.0
+    ai_scout_max_output_bytes: int = 2 * 1024 * 1024
+    ai_scout_scheduler_interval_seconds: float = 30.0
 
     @field_validator("log_level")
     @classmethod
@@ -105,12 +113,27 @@ class Settings(BaseSettings):
         "fetch_document_max_bytes",
         "fetch_image_max_bytes",
         "evidence_upload_max_bytes",
+        "ai_scout_max_output_bytes",
     )
     @classmethod
     def _positive_evidence_limit(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("evidence collection and processing limits must be positive")
         return value
+
+    @field_validator("ai_scout_timeout_seconds", "ai_scout_scheduler_interval_seconds")
+    @classmethod
+    def _positive_ai_duration(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("AI scout durations must be positive")
+        return value
+
+    @field_validator("ai_codex_command", "ai_claude_command")
+    @classmethod
+    def _nonempty_ai_command(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("AI provider command must not be empty")
+        return value.strip()
 
     @field_validator("document_zip_max_ratio")
     @classmethod
@@ -152,6 +175,10 @@ class Settings(BaseSettings):
     @property
     def logs_dir(self) -> Path:
         return self.resolved_data_dir / "logs"
+
+    @property
+    def ai_work_dir(self) -> Path:
+        return self.resolved_data_dir / "ai-work"
 
     def data_paths(self) -> dict[str, Path]:
         return {
