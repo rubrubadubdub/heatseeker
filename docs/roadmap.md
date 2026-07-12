@@ -20,7 +20,7 @@ detail: read the spec section for the milestone via
 | — | Document & evidence processing pipeline (PDF/OOXML/image extraction, HTML reference + publication-date extraction, manual evidence) | **Done** (2026-07-12) | see M2/M3 briefs | Migration 0011; versioned runs per (pipeline_version, config_hash); OCR/vision toggles exist but stay off until a provider lands (see gaps) |
 | — | Agentic Source Scout (Codex/Claude plans, scope, budgets, schedules, proposals, optional policy-cleared auto-crawl) | **Done** (2026-07-12; ADR-0014) | — | Early M11 vertical slice; migration 0013 |
 | M4 | Entity core & resolution | **Done** (2026-07-12; adversarially refined same day) | [M4-entities.md](milestones/M4-entities.md) | Multi-key blocking; priority dimensions; exact pointer/candidate reversal audit; ancestry + decision-bypass guards; nothing auto-merges |
-| M5 | Company discovery & profile | Not started | — | |
+| M5 | Company discovery & profile | **Done** (2026-07-12, acceptance verified) | [M5-discovery-profiles.md](milestones/M5-discovery-profiles.md) | Evidence chain (Observation→FactAssertion) + field-level confidence landed here (migration 0015); CSV discovery import scope-aware; missing stays missing throughout |
 | M6 | Projects, relationships, graph | Not started | — | |
 | M7 | News, events, macro signals | Not started | — | |
 | M8 | Lead intelligence | Not started | — | |
@@ -109,8 +109,10 @@ improve workflows.
 
 | Gap | Why it matters | Lands |
 |---|---|---|
-| Structured API adapters (ABR/ASIC/NZBN keys, params, pagination) | Official registries are the backbone of company facts; plain GET only reaches their homepages | M4/M5 (entity ingestion) |
-| Bulk dataset import (CSV/XLSX/Parquet, spec §12.2) | MVP requires ≥1 official dataset import | M4/M5 |
+| Structured API adapters (ABR/ASIC/NZBN keys, params, pagination) | Official registries are the backbone of company facts; plain GET only reaches their homepages | M5 follow-up / M7 |
+| Bulk import beyond CSV (XLSX/Parquet/ZIP, spec §12.2 — CSV landed in M5) | Some official extracts ship as XLSX/Parquet | when a real dataset needs it |
+| Parser-driven service/archetype claims from crawled pages (observations exist; only import + manual populate them today) | Profile enrichment from company websites needs deterministic page parsing or M11 AI extraction | M7 parsers / M11 |
+| Pack-configurable tier thresholds (v1 rubric is deterministic code constants) | §16.4 says naming and thresholds stay configurable | M8 (lead rules land in packs) |
 | RSS/Atom per-entry parsing (feeds stored as one XML doc today) | News/story clustering needs per-article documents | M7 (or earlier) |
 | Autopilot-scheduled crawls (crawls are on-demand) | Needs a cadence policy to avoid 21 sites × every tick | short follow-up |
 | OCR/vision extraction (`evidence_ocr_enabled`/`evidence_vision_enabled` exist, default off, no provider wired) | Scanned PDFs and images carry text the native extractors can't reach; runs record OCR as disabled/unavailable rather than pretending | OCR: any time via a free local engine (e.g. Tesseract/RapidOCR — running-cost-free rule: free deps fine, paid services not). Semantic vision: M11 |
