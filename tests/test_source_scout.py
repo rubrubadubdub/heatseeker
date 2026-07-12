@@ -139,6 +139,31 @@ def test_existing_source_is_recorded_as_duplicate(engine, settings):
         assert session.scalar(select(func.count(SourceDefinition.id))) == 1
 
 
+def test_existing_domains_are_included_in_provider_request(engine, settings):
+    class CapturingProvider(FakeProvider):
+        def complete(self, prompt, *, model, budgets, cancelled):
+            assert "existing.example" in prompt
+            return super().complete(
+                prompt, model=model, budgets=budgets, cancelled=cancelled
+            )
+
+    with session_scope(engine) as session:
+        session.add(
+            SourceDefinition(
+                name="Existing",
+                source_category="official_register",
+                base_url="https://existing.example/registry",
+                access_method="html",
+                authority_tier=1,
+            )
+        )
+        plan = _plan(session, name="Existing domains")
+        run = create_run(session, plan, trigger="manual", actor="test")
+        run_id = run.id
+
+    execute_run(engine, settings, run_id, provider=CapturingProvider())
+
+
 def test_due_plan_is_snapshotted_and_rescheduled(engine):
     with session_scope(engine) as session:
         plan = _plan(
@@ -234,6 +259,9 @@ def test_codex_adapter_uses_search_readonly_ephemeral_and_schema(settings, monke
     def fake_run(command, prompt, *, cwd, **kwargs):
         captured["command"] = command
         captured["prompt"] = prompt
+        schema_path = command[command.index("--output-schema") + 1]
+        with open(schema_path, encoding="utf-8") as handle:
+            captured["schema"] = json.load(handle)
         output_path = command[command.index("--output-last-message") + 1]
         with open(output_path, "w", encoding="utf-8") as handle:
             handle.write(output)
@@ -245,6 +273,11 @@ def test_codex_adapter_uses_search_readonly_ephemeral_and_schema(settings, monke
     )
 
     assert result.output.summary == "none"
+    assert "format" not in json.dumps(captured["schema"])
+    candidate_schema = captured["schema"]["$defs"]["CandidateSource"]
+    assert set(candidate_schema["required"]) == set(candidate_schema["properties"])
+    coverage_schema = captured["schema"]["$defs"]["CoverageSuggestion"]
+    assert coverage_schema["additionalProperties"] is False
     assert "--search" in captured["command"]
     assert "--ephemeral" in captured["command"]
     assert 'shell_environment_policy.inherit="none"' in captured["command"]

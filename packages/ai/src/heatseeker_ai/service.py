@@ -164,7 +164,9 @@ def reconcile_terminal_runs(session: Session) -> int:
 
 def _existing_domains(session: Session) -> list[str]:
     domains = set()
-    for url in session.scalars(select(SourceDefinition.base_url).where(SourceDefinition.base_url)):
+    for url in session.scalars(
+        select(SourceDefinition.base_url).where(SourceDefinition.base_url.is_not(None))
+    ):
         hostname = urlsplit(url).hostname
         if hostname:
             domains.add(hostname.lower())

@@ -2,7 +2,14 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+
+
+class CoverageSuggestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dimension: str = Field(pattern=r"^[a-z][a-z0-9_]{0,99}$")
+    targets: list[str] = Field(default_factory=list, max_length=20)
 
 
 class CandidateSource(BaseModel):
@@ -17,19 +24,7 @@ class CandidateSource(BaseModel):
     authority_tier: int = Field(default=6, ge=1, le=7)
     originating_query: str | None = Field(default=None, max_length=1000)
     supporting_urls: list[HttpUrl] = Field(default_factory=list, max_length=10)
-    suggested_coverage: dict[str, list[str]] = Field(default_factory=dict)
-
-    @field_validator("suggested_coverage")
-    @classmethod
-    def _bounded_coverage(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
-        if len(value) > 10:
-            raise ValueError("suggested coverage has too many dimensions")
-        for dimension, targets in value.items():
-            if len(dimension) > 100 or len(targets) > 20:
-                raise ValueError("suggested coverage exceeds limits")
-            if any(len(target) > 300 for target in targets):
-                raise ValueError("suggested coverage target is too long")
-        return value
+    suggested_coverage: list[CoverageSuggestion] = Field(default_factory=list, max_length=10)
 
 
 class SourceExpansionResult(BaseModel):

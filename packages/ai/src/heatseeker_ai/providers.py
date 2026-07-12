@@ -175,7 +175,9 @@ def _run_agent(
         raise ProviderError("provider output exceeded configured byte limit")
     if process.returncode != 0:
         detail = stderr.strip() or stdout.strip() or f"exit code {process.returncode}"
-        raise ProviderError(detail[:4000])
+        if len(detail) > 4000:
+            detail = f"{detail[:1000]}\n... provider output truncated ...\n{detail[-2900:]}"
+        raise ProviderError(detail)
     return stdout, stderr
 
 
@@ -184,6 +186,39 @@ def _json_result(value: str) -> SourceExpansionResult:
         return SourceExpansionResult.model_validate_json(value)
     except Exception as exc:
         raise ProviderError(f"provider returned invalid structured output: {exc}") from exc
+
+
+def _codex_schema(value):
+    """Remove annotation keywords unsupported by Codex structured outputs.
+
+    Pydantic still performs full URL validation when the response is parsed.
+    """
+    if isinstance(value, dict):
+        unsupported_annotations = {
+            "default",
+            "format",
+            "maxItems",
+            "maxLength",
+            "maximum",
+            "minItems",
+            "minLength",
+            "minimum",
+            "pattern",
+            "title",
+        }
+        result = {
+            key: _codex_schema(item)
+            for key, item in value.items()
+            if key not in unsupported_annotations
+        }
+        properties = result.get("properties")
+        if isinstance(properties, dict):
+            result["required"] = list(properties)
+            result["additionalProperties"] = False
+        return result
+    if isinstance(value, list):
+        return [_codex_schema(item) for item in value]
+    return value
 
 
 class CodexProvider:
@@ -209,7 +244,8 @@ class CodexProvider:
             schema_path = workdir / "source-expansion.schema.json"
             output_path = workdir / "result.json"
             schema_path.write_text(
-                json.dumps(SourceExpansionResult.model_json_schema()), encoding="utf-8"
+                json.dumps(_codex_schema(SourceExpansionResult.model_json_schema())),
+                encoding="utf-8",
             )
             command = [
                 executable,

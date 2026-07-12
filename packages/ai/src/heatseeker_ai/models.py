@@ -183,7 +183,7 @@ class SourceProposal(Base):
     confidence: Mapped[float] = mapped_column(Float)
     originating_query: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     supporting_urls: Mapped[list] = mapped_column(JSON, default=list)
-    suggested_coverage: Mapped[dict] = mapped_column(JSON, default=dict)
+    suggested_coverage: Mapped[list] = mapped_column(JSON, default=list)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
     reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
