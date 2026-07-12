@@ -350,3 +350,78 @@ def test_source_scout_control_panel_creates_and_queues_plan(settings, monkeypatc
         queued = client.post(f"/source-scout/plans/{plan_id}/run", follow_redirects=False)
         assert queued.status_code == 303
         assert "/source-scout/runs/" in queued.headers["location"]
+
+
+def test_resolve_command_finds_cli_outside_path(tmp_path, monkeypatch):
+    """CLIs installed per-user (npm/pnpm global, ~/.local/bin) work without PATH edits."""
+    import os
+
+    from heatseeker_ai import providers
+
+    fake_bin = tmp_path / "fake-install"
+    fake_bin.mkdir()
+    exe_name = "scoutcli.cmd" if os.name == "nt" else "scoutcli"
+    fake_exe = fake_bin / exe_name
+    fake_exe.write_text("echo ok", encoding="utf-8")
+    monkeypatch.setattr(providers, "_discovery_dirs", lambda: [fake_bin])
+
+    assert providers._resolve_command("scoutcli") == str(fake_exe)
+    # An explicit-but-missing path must not fall back to guessing elsewhere.
+    assert providers._resolve_command(str(tmp_path / "nope" / "scoutcli")) is None
+    # An explicit existing path still wins untouched.
+    assert providers._resolve_command(str(fake_exe)) == str(fake_exe.resolve())
+
+
+def test_discovery_dirs_cover_user_install_locations(monkeypatch):
+    import os
+
+    from heatseeker_ai.providers import _discovery_dirs
+
+    dirs = [str(d).lower() for d in _discovery_dirs()]
+    assert any(d.endswith(os.path.join(".local", "bin")) for d in dirs)
+    if os.name == "nt":
+        assert any(d.endswith("npm") for d in dirs)
+
+
+def test_provider_health_reports_path_and_actionable_hints(settings):
+    from heatseeker_ai.providers import provider_health
+
+    missing = settings.model_copy(
+        update={"ai_codex_command": "definitely-not-a-real-cli-xyz"}
+    )
+    health = provider_health(missing, "codex")
+    assert not health.installed
+    assert health.path is None
+    assert "known install folders" in health.detail
+    assert "npm i -g @openai/codex" in health.hint
+    assert "HEATSEEKER_AI_CODEX_COMMAND" in health.hint
+
+
+def test_ide_bundled_binary_discovered(tmp_path, monkeypatch):
+    """A CLI bundled inside a VS Code-family extension is found, newest version first."""
+    import os
+
+    from heatseeker_ai import providers
+
+    exe_name = "claude.exe" if os.name == "nt" else "claude"
+    for version in ("2.1.100", "2.1.176"):
+        binary = (
+            tmp_path
+            / ".vscode"
+            / "extensions"
+            / f"anthropic.claude-code-{version}-win32-x64"
+            / "resources"
+            / "native-binary"
+            / exe_name
+        )
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"stub")
+    monkeypatch.setattr(providers.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(providers, "_discovery_dirs", lambda: [])
+    monkeypatch.setattr(providers.shutil, "which", lambda _name: None)
+
+    resolved = providers._resolve_command("claude")
+    assert resolved is not None
+    assert "2.1.176" in resolved
+    # Unknown commands never trigger extension scanning.
+    assert providers._resolve_command("someothercli") is None

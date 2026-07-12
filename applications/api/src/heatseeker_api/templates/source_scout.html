@@ -19,7 +19,9 @@
           </span>
         </div>
         <div class="small text-secondary mt-2">{{ health.version or health.detail }}</div>
+        {% if health.path %}<div class="small text-secondary mono" title="resolved executable">{{ health.path }}</div>{% endif %}
         {% if health.installed and not health.authenticated %}<div class="small mt-1 mono">{{ health.detail }}</div>{% endif %}
+        {% if health.hint %}<div class="small mt-1 text-warning">{{ health.hint }}</div>{% endif %}
       </div>
     </div>
   </div>

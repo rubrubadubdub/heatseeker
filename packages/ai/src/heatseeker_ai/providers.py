@@ -36,6 +36,8 @@ class ProviderHealth:
     version: str | None = None
     detail: str | None = None
     model_suggestions: tuple[str, ...] = ()
+    path: str | None = None  # resolved executable actually used
+    hint: str | None = None  # one actionable next step for the user, if any
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,11 +63,87 @@ class SourceScoutProvider(Protocol):
     ) -> ProviderResult: ...
 
 
+def _discovery_dirs() -> list[Path]:
+    """Well-known per-user CLI install locations, checked when PATH lookup fails.
+
+    Covers the npm/pnpm global folders and the native installers' ~/.local/bin, so a
+    CLI that was installed and signed in once for this user keeps working even when
+    the process that launched Heatseeker doesn't inherit an updated PATH.
+    """
+    home = Path.home()
+    dirs = [home / ".local" / "bin"]
+    if os.name == "nt":
+        for env_var, subdir in (("APPDATA", "npm"), ("LOCALAPPDATA", "pnpm")):
+            base = os.environ.get(env_var)
+            if base:
+                dirs.append(Path(base) / subdir)
+    else:
+        dirs.extend(
+            [
+                home / ".npm-global" / "bin",
+                home / ".volta" / "bin",
+                home / ".bun" / "bin",
+                Path("/usr/local/bin"),
+                Path("/opt/homebrew/bin"),
+            ]
+        )
+    return dirs
+
+
+# CLI binaries bundled inside IDE extensions. The Claude Code VS Code extension ships
+# the full native CLI, and credentials are per-user (shared between bundled and
+# standalone installs), so the sign-in done in the IDE works for Heatseeker too.
+_IDE_EXTENSION_GLOBS = {
+    "claude": ("anthropic.claude-code-*",),
+    "codex": ("openai.chatgpt-*",),
+}
+_IDE_DIRS = (".vscode", ".vscode-insiders", ".cursor", ".windsurf")
+
+
+def _extension_version_key(directory: Path) -> tuple[int, ...]:
+    import re
+
+    match = re.search(r"(\d+(?:\.\d+)+)", directory.name)
+    return tuple(int(part) for part in match.group(1).split(".")) if match else (0,)
+
+
+def _ide_bundled_binaries(command: str) -> list[Path]:
+    globs = _IDE_EXTENSION_GLOBS.get(command, ())
+    if not globs:
+        return []
+    exe_name = f"{command}.exe" if os.name == "nt" else command
+    found: list[Path] = []
+    for ide_dir in _IDE_DIRS:
+        extensions_root = Path.home() / ide_dir / "extensions"
+        if not extensions_root.is_dir():
+            continue
+        for pattern in globs:
+            for extension in sorted(
+                extensions_root.glob(pattern), key=_extension_version_key, reverse=True
+            ):
+                found.extend(sorted(extension.rglob(exe_name)))
+    return found
+
+
 def _resolve_command(command: str) -> str | None:
     candidate = Path(command).expanduser()
     if candidate.is_file():
         return str(candidate.resolve())
-    return shutil.which(command)
+    found = shutil.which(command)
+    if found:
+        return found
+    if Path(command).name != command:
+        return None  # an explicit path that doesn't exist — don't guess elsewhere
+    names = [f"{command}.exe", f"{command}.cmd", command] if os.name == "nt" else [command]
+    for directory in _discovery_dirs():
+        for name in names:
+            fallback = directory / name
+            if fallback.is_file():
+                return str(fallback)
+    for bundled in _ide_bundled_binaries(command):
+        if bundled.is_file():
+            return str(bundled)
+    return None
 
 
 def _run_probe(command: list[str]) -> tuple[int, str]:
@@ -84,13 +162,47 @@ def _run_probe(command: list[str]) -> tuple[int, str]:
     return completed.returncode, output[:1000]
 
 
+_INSTALL_HINTS = {
+    "codex": (
+        "Install the Codex CLI (npm i -g @openai/codex), or install the ChatGPT "
+        "VS Code extension (its bundled codex.exe is detected automatically), or set "
+        "HEATSEEKER_AI_CODEX_COMMAND to a full path. No PATH edit is needed — "
+        "npm/pnpm global, ~/.local/bin, and IDE extension folders are searched."
+    ),
+    "claude": (
+        "Install the Claude Code CLI (npm i -g @anthropic-ai/claude-code), or install "
+        "the Claude Code VS Code extension (its bundled claude.exe is detected "
+        "automatically), or set HEATSEEKER_AI_CLAUDE_COMMAND to a full path. No PATH "
+        "edit is needed — npm/pnpm global, ~/.local/bin, and IDE extension folders "
+        "are searched."
+    ),
+}
+
+_LOGIN_HINTS = {
+    "codex": (
+        "Run `codex login` once as this Windows user — a browser sign-in tied to your "
+        "ChatGPT/Codex subscription; the credential stays in the CLI's own store."
+    ),
+    "claude": (
+        "Run `claude /login` once as this Windows user — a browser sign-in tied to your "
+        "Claude subscription; the credential stays in the CLI's own store."
+    ),
+}
+
+
 def provider_health(settings: Settings, provider: str) -> ProviderHealth:
     if provider == "disabled":
         return ProviderHealth("disabled", True, True, detail="AI calls are disabled")
     command_name = settings.ai_codex_command if provider == "codex" else settings.ai_claude_command
     command = _resolve_command(command_name)
     if command is None:
-        return ProviderHealth(provider, False, False, detail=f"{command_name!r} not found on PATH")
+        return ProviderHealth(
+            provider,
+            False,
+            False,
+            detail=f"{command_name!r} not found on PATH or in known install folders",
+            hint=_INSTALL_HINTS.get(provider),
+        )
     version_code, version = _run_probe([command, "--version"])
     if provider == "codex":
         auth_code, auth = _run_probe([command, "login", "status"])
@@ -106,6 +218,8 @@ def provider_health(settings: Settings, provider: str) -> ProviderHealth:
         version=version or None,
         detail=detail,
         model_suggestions=suggestions,
+        path=command,
+        hint=None if auth_code == 0 else _LOGIN_HINTS.get(provider),
     )
 
 
