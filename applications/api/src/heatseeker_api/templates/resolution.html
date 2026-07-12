@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Resolution queue · Heatseeker{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h1 class="h3 mb-0">Entity resolution queue</h1>
+  <div class="d-flex gap-2">
+    <form method="post" action="/entities/scan">
+      <button class="btn btn-sm btn-outline-primary">Re-scan</button>
+    </form>
+    <a class="btn btn-sm btn-outline-secondary" href="/resolution{{ '' if show_all else '?all=1' }}">
+      {{ 'Hide resolved' if show_all else 'Show resolved' }}
+    </a>
+  </div>
+</div>
+<p class="small text-secondary">
+  Scored duplicate suggestions — nothing merges automatically. Every decision is recorded;
+  merges preserve the original records and can be reversed from the entity page.
+</p>
+
+<table class="table table-sm align-middle">
+  <thead><tr><th>pair</th><th>state</th><th>score</th><th>signals</th><th style="min-width: 16rem">decision</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    {% set candidate = row.candidate %}
+    <tr>
+      <td>
+        <a href="/entities/{{ row.org_a.id }}">{{ row.org_a.canonical_name }}</a><br>
+        <a href="/entities/{{ row.org_b.id }}">{{ row.org_b.canonical_name }}</a>
+      </td>
+      <td>
+        <span class="badge text-bg-{{ match_state_badges.get(candidate.match_state, 'secondary') }}">
+          {{ candidate.match_state }}</span>
+        {% if candidate.conflict_count %}
+        <span class="badge text-bg-danger" title="conflicting signals">{{ candidate.conflict_count }} conflict{{ 's' if candidate.conflict_count != 1 }}</span>
+        {% endif %}
+      </td>
+      <td class="mono">{{ '%.2f' % candidate.score }}</td>
+      <td class="small">
+        {% for signal in candidate.signals %}
+        <div title="{{ signal.detail }}">{{ signal.signal }} <span class="text-secondary">({{ signal.weight }})</span></div>
+        {% endfor %}
+        {% if candidate.notes %}<div class="text-warning">{{ candidate.notes }}</div>{% endif %}
+      </td>
+      <td>
+        {% if candidate.resolution %}
+        <span class="badge text-bg-secondary">{{ candidate.resolution }}</span>
+        <div class="small text-secondary">by {{ candidate.resolved_by }}
+          {% if candidate.resolved_at %}{{ candidate.resolved_at.strftime('%Y-%m-%d') }}{% endif %}</div>
+        {% else %}
+        <form method="post" action="/resolution/{{ candidate.id }}/decide" class="vstack gap-1">
+          <div class="form-check form-check-sm small">
+            <input class="form-check-input" type="radio" name="survivor_id"
+                   value="{{ row.org_a.id }}" id="s-{{ candidate.id }}-a" checked>
+            <label class="form-check-label" for="s-{{ candidate.id }}-a">
+              keep “{{ row.org_a.canonical_name }}”</label>
+          </div>
+          <div class="form-check form-check-sm small">
+            <input class="form-check-input" type="radio" name="survivor_id"
+                   value="{{ row.org_b.id }}" id="s-{{ candidate.id }}-b">
+            <label class="form-check-label" for="s-{{ candidate.id }}-b">
+              keep “{{ row.org_b.canonical_name }}”</label>
+          </div>
+          <input name="notes" class="form-control form-control-sm" placeholder="Notes (optional)">
+          <div class="btn-group btn-group-sm">
+            <button name="decision" value="merge" class="btn btn-warning">Merge</button>
+            <button name="decision" value="related" class="btn btn-outline-secondary">Related</button>
+            <button name="decision" value="distinct" class="btn btn-outline-secondary">Distinct</button>
+          </div>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="small text-secondary">
+      Queue is empty. Run a scan to look for duplicates among current organisations.
+    </td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

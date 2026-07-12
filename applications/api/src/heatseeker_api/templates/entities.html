@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Entities · Heatseeker{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h1 class="h3 mb-0">Entities</h1>
+  <div class="d-flex gap-2">
+    <form method="post" action="/entities/scan">
+      <button class="btn btn-sm btn-outline-primary">Scan for duplicates</button>
+    </form>
+    <a href="/resolution" class="btn btn-sm btn-outline-warning">
+      Resolution queue{% if queue_size %} <span class="badge text-bg-warning">{{ queue_size }}</span>{% endif %}
+    </a>
+  </div>
+</div>
+<p class="small text-secondary">
+  {{ counts.live }} live organisation{{ 's' if counts.live != 1 }}{% if counts.merged %}
+  · {{ counts.merged }} merged (preserved, reversible){% endif %}. Legal entities and
+  branches stay distinct; duplicates go through the resolution queue, never silent merges.
+</p>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <form method="get" action="/entities" class="mb-2 d-flex gap-2">
+      <input name="q" value="{{ q }}" class="form-control form-control-sm"
+             placeholder="Search name, identifier, or domain">
+      <button class="btn btn-sm btn-outline-secondary">Search</button>
+    </form>
+    <table class="table table-sm align-middle">
+      <thead><tr><th>organisation</th><th>type</th><th>identifiers</th><th>domains</th><th>profile</th></tr></thead>
+      <tbody>
+        {% for org in organisations %}
+        <tr>
+          <td>
+            <a href="/entities/{{ org.id }}">{{ org.canonical_name }}</a>
+            {% if org.status != 'active' %}<span class="badge text-bg-secondary">{{ org.status }}</span>{% endif %}
+            {% if org.provenance == 'manual' %}<span class="badge text-bg-light text-dark" title="user-entered record">manual</span>{% endif %}
+          </td>
+          <td class="small">{{ org.organisation_type }}</td>
+          <td class="small mono">
+            {% for identifier in org.identifiers %}{{ identifier.scheme }}:{{ identifier.value }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+          </td>
+          <td class="small mono">
+            {% for domain in org.domains %}{{ domain.domain }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+          </td>
+          <td class="small">{{ '%.0f' % (org.profile_completeness * 100) }}%</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-secondary small">No organisations yet — add one, or wait for M5 discovery to populate from evidence.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">New organisation (manual evidence)</div>
+      <div class="card-body">
+        <form method="post" action="/entities/create" class="vstack gap-2">
+          <input name="canonical_name" class="form-control form-control-sm" placeholder="Canonical name" required>
+          <input name="legal_name" class="form-control form-control-sm" placeholder="Legal name (optional)">
+          <select name="organisation_type" class="form-select form-select-sm">
+            {% for type_name in organisation_types %}
+            <option value="{{ type_name }}">{{ type_name }}</option>
+            {% endfor %}
+          </select>
+          <div class="input-group input-group-sm">
+            <select name="identifier_scheme" class="form-select" style="max-width: 8rem">
+              {% for scheme in identifier_schemes %}
+              <option value="{{ scheme }}">{{ scheme }}</option>
+              {% endfor %}
+            </select>
+            <input name="identifier_value" class="form-control" placeholder="Identifier (optional)">
+          </div>
+          <input name="domain" class="form-control form-control-sm" placeholder="Website domain (optional)">
+          <button class="btn btn-sm btn-primary">Create</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}{{ organisation.canonical_name }} · Heatseeker{% endblock %}
+{% block content %}
+{% set canonical = profile.canonical %}
+<nav class="small mb-2"><a href="/entities">← entities</a></nav>
+
+<div class="d-flex justify-content-between align-items-start">
+  <div>
+    <h1 class="h3 mb-1">{{ organisation.canonical_name }}</h1>
+    <p class="small text-secondary mb-2">
+      {{ organisation.organisation_type }} · status {{ organisation.status }} ·
+      provenance {{ organisation.provenance }} ·
+      profile {{ '%.0f' % (organisation.profile_completeness * 100) }}% ·
+      first observed {{ organisation.first_observed_at.date() }}
+    </p>
+  </div>
+</div>
+
+{% if organisation.merged_into_id %}
+<div class="alert alert-warning py-2 small">
+  This record was merged into
+  <a href="/entities/{{ canonical.id }}">{{ canonical.canonical_name }}</a>.
+  The original data below is preserved and the merge is reversible.
+</div>
+{% elif profile.group | length > 1 %}
+<div class="alert alert-info py-2 small">
+  Canonical record for a merge group of {{ profile.group | length }} — absorbed records
+  remain intact and attributable below.
+</div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <h2 class="h6">Identifiers</h2>
+    <table class="table table-sm">
+      <thead><tr><th>scheme</th><th>value</th><th>origin record</th></tr></thead>
+      <tbody>
+      {% for row in profile.identifiers %}
+        <tr>
+          <td class="small">{{ row.item.scheme }}</td>
+          <td class="mono">{{ row.item.value }}</td>
+          <td class="small">
+            {% if row.origin.id == canonical.id %}—{% else %}
+            <a href="/entities/{{ row.origin.id }}">{{ row.origin.canonical_name }}</a>{% endif %}
+          </td>
+        </tr>
+      {% else %}<tr><td colspan="3" class="small text-secondary">none recorded</td></tr>{% endfor %}
+      </tbody>
+    </table>
+
+    <h2 class="h6">Domains</h2>
+    <table class="table table-sm">
+      <tbody>
+      {% for row in profile.domains %}
+        <tr>
+          <td class="mono">{{ row.item.domain }}</td>
+          <td class="small">{% if row.item.is_primary %}<span class="badge text-bg-primary">primary</span>{% endif %}</td>
+          <td class="small">
+            {% if row.origin.id == canonical.id %}—{% else %}
+            <a href="/entities/{{ row.origin.id }}">{{ row.origin.canonical_name }}</a>{% endif %}
+          </td>
+        </tr>
+      {% else %}<tr><td class="small text-secondary">none recorded</td></tr>{% endfor %}
+      </tbody>
+    </table>
+
+    <h2 class="h6">Contact points</h2>
+    <table class="table table-sm">
+      <thead><tr><th>type</th><th>value</th><th>flags</th><th>origin record</th></tr></thead>
+      <tbody>
+      {% for row in profile.contact_points %}
+        <tr>
+          <td class="small">{{ row.item.contact_type }}</td>
+          <td class="mono">{{ row.item.value }}</td>
+          <td class="small">
+            {% if row.item.role_based %}<span class="badge text-bg-secondary">role</span>{% endif %}
+            {% if not row.item.public_business_contact %}<span class="badge text-bg-danger">non-public</span>{% endif %}
+          </td>
+          <td class="small">
+            {% if row.origin.id == canonical.id %}—{% else %}
+            <a href="/entities/{{ row.origin.id }}">{{ row.origin.canonical_name }}</a>{% endif %}
+          </td>
+        </tr>
+      {% else %}<tr><td colspan="4" class="small text-secondary">none recorded</td></tr>{% endfor %}
+      </tbody>
+    </table>
+
+    <h2 class="h6">Operational units (never flattened into the legal entity)</h2>
+    <table class="table table-sm">
+      <thead><tr><th>type</th><th>name</th><th>status</th><th>origin record</th></tr></thead>
+      <tbody>
+      {% for row in profile.units %}
+        <tr>
+          <td class="small">{{ row.item.unit_type }}</td>
+          <td>{{ row.item.name or '—' }}</td>
+          <td class="small">{{ row.item.active_status }}</td>
+          <td class="small">
+            {% if row.origin.id == canonical.id %}—{% else %}
+            <a href="/entities/{{ row.origin.id }}">{{ row.origin.canonical_name }}</a>{% endif %}
+          </td>
+        </tr>
+      {% else %}<tr><td colspan="4" class="small text-secondary">none recorded</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col-lg-4">
+    {% if not organisation.merged_into_id %}
+    <div class="card mb-3">
+      <div class="card-header">Merge a duplicate into this record</div>
+      <div class="card-body">
+        <form method="post" action="/entities/{{ organisation.id }}/merge" class="vstack gap-2">
+          <input name="absorbed_id" class="form-control form-control-sm mono"
+                 placeholder="Duplicate organisation id" required>
+          <input name="rationale" class="form-control form-control-sm"
+                 placeholder="Rationale (required, kept in audit)" required>
+          <button class="btn btn-sm btn-warning">Merge (reversible)</button>
+        </form>
+        <div class="form-text">Original records are preserved; use the
+          <a href="/resolution">resolution queue</a> for scored suggestions.</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card-header">Merge history</div>
+      <div class="card-body small">
+        {% for merge in merges %}
+        <div class="border-bottom pb-2 mb-2">
+          <a href="/entities/{{ merge.absorbed_id }}">absorbed record</a> →
+          <a href="/entities/{{ merge.survivor_id }}">survivor</a><br>
+          <span class="text-secondary">{{ merge.performed_at.strftime('%Y-%m-%d %H:%M') }}
+            by {{ merge.performed_by }}</span><br>
+          {{ merge.rationale }}
+          {% if merge.reversed_at %}
+          <div class="text-warning">reversed {{ merge.reversed_at.strftime('%Y-%m-%d %H:%M') }}:
+            {{ merge.reversal_reason }}</div>
+          {% else %}
+          <form method="post" action="/merges/{{ merge.id }}/reverse" class="d-flex gap-1 mt-1">
+            <input name="reason" class="form-control form-control-sm" placeholder="Reason" required>
+            <button class="btn btn-sm btn-outline-warning py-0">Reverse</button>
+          </form>
+          {% endif %}
+        </div>
+        {% else %}
+        <span class="text-secondary">No merges involve this record.</span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
