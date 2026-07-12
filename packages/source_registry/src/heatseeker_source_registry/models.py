@@ -390,6 +390,18 @@ class SourceRelationship(Base):
     )
 
 
+class DocumentProcessingStatus(enum.StrEnum):
+    """Terminal outcomes for one versioned document-processing attempt."""
+
+    SUCCEEDED = "succeeded"
+    PARTIAL = "partial"
+    UNSUPPORTED = "unsupported"
+    QUARANTINED = "quarantined"
+    CORRUPT = "corrupt"
+    ENCRYPTED = "encrypted"
+    FAILED = "failed"
+
+
 class SourceDocument(Base):
     """One retrieved artefact, immutable. Raw bytes live in the content-addressed store;
     repeat retrievals of identical content bump retrieval_count instead of duplicating."""
@@ -415,6 +427,9 @@ class SourceDocument(Base):
     claimed_published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     content_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    detected_content_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    content_disposition: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    original_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     raw_storage_path: Mapped[str] = mapped_column(String(500))
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -434,6 +449,22 @@ class SourceDocument(Base):
     source_definition: Mapped["SourceDefinition"] = relationship(back_populates="documents")
     coverage: Mapped["SourceCoverage | None"] = relationship(
         back_populates="documents", foreign_keys=[source_coverage_id]
+    )
+    processing_runs: Mapped[list["DocumentProcessingRun"]] = relationship(
+        back_populates="source_document",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    outbound_references: Mapped[list["SourceDocumentReference"]] = relationship(
+        back_populates="parent_document",
+        cascade="all, delete-orphan",
+        foreign_keys="SourceDocumentReference.parent_document_id",
+        passive_deletes=True,
+    )
+    inbound_references: Mapped[list["SourceDocumentReference"]] = relationship(
+        back_populates="child_document",
+        foreign_keys="SourceDocumentReference.child_document_id",
+        passive_deletes=True,
     )
 
     __table_args__ = (
@@ -455,6 +486,134 @@ class SourceDocument(Base):
         CheckConstraint(
             "http_status IS NULL OR (http_status >= 100 AND http_status <= 599)",
             name="http_status_range",
+        ),
+    )
+
+
+class DocumentProcessingRun(Base):
+    """Append-only result of one versioned extraction pipeline for a raw document."""
+
+    __tablename__ = "document_processing_run"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    source_document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("source_document.id", ondelete="CASCADE"), nullable=False
+    )
+    pipeline_version: Mapped[str] = mapped_column(String(100))
+    config_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20))
+    detected_content_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    extraction_method: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    manifest_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    text_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    text_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    text_chars: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ``metadata`` is reserved by SQLAlchemy's declarative API; keep that database
+    # column name while exposing an unambiguous Python attribute.
+    processing_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+    source_document: Mapped["SourceDocument"] = relationship(back_populates="processing_runs")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_document_id",
+            "pipeline_version",
+            "config_hash",
+            name="uq_document_processing_run_document_pipeline_config",
+        ),
+        CheckConstraint(
+            "status IN ('succeeded','partial','unsupported','quarantined',"
+            "'corrupt','encrypted','failed')",
+            name="status",
+        ),
+        CheckConstraint("length(trim(pipeline_version)) > 0", name="pipeline_version_nonempty"),
+        CheckConstraint("length(config_hash) = 64", name="config_hash_length"),
+        CheckConstraint(
+            "manifest_hash IS NULL OR length(manifest_hash) = 64", name="manifest_hash_length"
+        ),
+        CheckConstraint("text_hash IS NULL OR length(text_hash) = 64", name="text_hash_length"),
+        CheckConstraint("text_chars IS NULL OR text_chars >= 0", name="text_chars_nonnegative"),
+        CheckConstraint("page_count IS NULL OR page_count >= 0", name="page_count_nonnegative"),
+        CheckConstraint(
+            "finished_at IS NULL OR started_at IS NULL OR finished_at >= started_at",
+            name="time_order",
+        ),
+        Index(
+            "ix_document_processing_run_document_status_created",
+            "source_document_id",
+            "status",
+            "created_at",
+        ),
+        Index("ix_document_processing_run_status", "status"),
+    )
+
+
+class SourceDocumentReference(Base):
+    """One discovered URL occurrence within a parent document, with its decision."""
+
+    __tablename__ = "source_document_reference"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    parent_document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("source_document.id", ondelete="CASCADE"), nullable=False
+    )
+    child_document_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("source_document.id", ondelete="SET NULL"), nullable=True
+    )
+    target_url: Mapped[str] = mapped_column(String(2000))
+    normalised_url: Mapped[str] = mapped_column(String(2000))
+    reference_kind: Mapped[str] = mapped_column(String(50))
+    discovery_rule: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    extractor_version: Mapped[str] = mapped_column(String(100))
+    decision: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+
+    parent_document: Mapped["SourceDocument"] = relationship(
+        back_populates="outbound_references", foreign_keys=[parent_document_id]
+    )
+    child_document: Mapped["SourceDocument | None"] = relationship(
+        back_populates="inbound_references", foreign_keys=[child_document_id]
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "parent_document_id",
+            "extractor_version",
+            "reference_kind",
+            "ordinal",
+            name="uq_source_document_reference_occurrence",
+        ),
+        CheckConstraint(
+            "child_document_id IS NULL OR child_document_id <> parent_document_id",
+            name="different_documents",
+        ),
+        CheckConstraint("length(trim(target_url)) > 0", name="target_url_nonempty"),
+        CheckConstraint("length(trim(normalised_url)) > 0", name="normalised_url_nonempty"),
+        CheckConstraint("length(trim(reference_kind)) > 0", name="reference_kind_nonempty"),
+        CheckConstraint("ordinal >= 0", name="ordinal_nonnegative"),
+        CheckConstraint("length(trim(extractor_version)) > 0", name="extractor_version_nonempty"),
+        CheckConstraint("length(trim(decision)) > 0", name="decision_nonempty"),
+        Index(
+            "ix_source_document_reference_parent_kind_decision",
+            "parent_document_id",
+            "reference_kind",
+            "decision",
+        ),
+        Index("ix_source_document_reference_child_document_id", "child_document_id"),
+        Index(
+            "ix_source_document_reference_normalised_url_decision",
+            "normalised_url",
+            "decision",
         ),
     )
 

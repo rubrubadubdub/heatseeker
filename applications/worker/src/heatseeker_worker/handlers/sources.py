@@ -2,7 +2,6 @@
 
 from heatseeker_common.db import session_scope
 from heatseeker_common.job_registry import JobContext, PermanentJobError, job_handler
-from heatseeker_common.settings import Settings
 from heatseeker_industry_packs.loader import default_packs_root, load_pack
 from heatseeker_source_registry.collect import collect_source
 from heatseeker_source_registry.models import SourceCoverage, SourceDefinition
@@ -32,7 +31,7 @@ def sync_seeds(ctx: JobContext) -> dict:
 
 @job_handler("sources.check_policy")
 def check_policy(ctx: JobContext) -> dict:
-    settings = Settings()
+    settings = ctx.settings
     source_id = ctx.payload["source_id"]
     coverage_id = ctx.payload.get("coverage_id")
     with session_scope(ctx.engine) as session:
@@ -57,7 +56,7 @@ def check_policy(ctx: JobContext) -> dict:
 @job_handler("sources.check_policy_all")
 def check_policy_all(ctx: JobContext) -> dict:
     """Policy-check every source that hasn't been checked yet (candidates first)."""
-    settings = Settings()
+    settings = ctx.settings
     results: dict[str, str] = {}
     results_by_id: dict[str, dict[str, str]] = {}
     with session_scope(ctx.engine) as session:
@@ -92,14 +91,20 @@ def crawl(ctx: JobContext) -> dict:
     """Crawl one source's site within budgets (M3)."""
     from heatseeker_source_registry.crawler import CrawlBudget, crawl_source
 
-    settings = Settings()
+    settings = ctx.settings
     budget = CrawlBudget.from_settings(
         settings,
         max_pages=ctx.payload.get("max_pages"),
         max_depth=ctx.payload.get("max_depth"),
     )
     with session_scope(ctx.engine) as session:
-        result = crawl_source(session, settings, ctx.payload["source_id"], budget=budget)
+        result = crawl_source(
+            session,
+            settings,
+            ctx.payload["source_id"],
+            budget=budget,
+            release_between_fetches=True,
+        )
     if result["outcome"] == "error":
         raise PermanentJobError(result.get("error", "invalid crawl request"))
     return result
@@ -110,7 +115,7 @@ def autopilot(ctx: JobContext) -> dict:
     """One self-driving tick: seed, policy-check, activate, collect, maintain."""
     from heatseeker_source_registry.autopilot import autopilot_tick
 
-    settings = Settings()
+    settings = ctx.settings
     with session_scope(ctx.engine) as session:
         return autopilot_tick(session, settings)
 
@@ -131,7 +136,7 @@ def recheck_policies(ctx: JobContext) -> dict:
 
     from heatseeker_common.timeutil import utc_now
 
-    settings = Settings()
+    settings = ctx.settings
     cutoff = utc_now() - timedelta(days=settings.robots_recheck_days)
     rechecked: dict[str, str] = {}
     with session_scope(ctx.engine) as session:
@@ -152,15 +157,20 @@ def collect_due_sources(ctx: JobContext) -> dict:
     """Collect every source whose adaptive schedule says it is due, politely."""
     from heatseeker_source_registry.schedule import collect_due
 
-    settings = Settings()
+    settings = ctx.settings
     limit = ctx.payload.get("limit")
     with session_scope(ctx.engine) as session:
-        return collect_due(session, settings, limit=limit)
+        return collect_due(
+            session,
+            settings,
+            limit=limit,
+            release_between_fetches=True,
+        )
 
 
 @job_handler("sources.collect")
 def collect(ctx: JobContext) -> dict:
-    settings = Settings()
+    settings = ctx.settings
     source_id = ctx.payload["source_id"]
     coverage_id = ctx.payload.get("coverage_id")
     pairing_ids = ctx.payload.get("pairing_ids") or []
@@ -180,6 +190,7 @@ def collect(ctx: JobContext) -> dict:
             source_id,
             coverage_id=coverage_id,
             scope_snapshot=scope_snapshot,
+            release_before_fetch=True,
         )
     if result["outcome"] == "error":
         raise PermanentJobError(result.get("error", "invalid collection request"))

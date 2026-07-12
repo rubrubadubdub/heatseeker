@@ -76,9 +76,7 @@ def _auto_activate(session: Session, settings: Settings) -> list[str]:
         )
     ).all()
     for source in candidates:
-        if not activation_blockers(
-            source, enforce_robots=robots_enforced(source, settings)
-        ):
+        if not activation_blockers(source, enforce_robots=robots_enforced(source, settings)):
             source.lifecycle_status = SourceLifecycle.ACTIVE
             source.updated_at = utc_now()
             audit.record(
@@ -111,7 +109,12 @@ def autopilot_tick(
     summary: dict = {"seeded": _bootstrap_seeds(session)}
     summary["policies_checked"] = _check_policies(session, settings, transport)
     summary["activated"] = _auto_activate(session, settings)
-    summary["collection"] = collect_due(session, settings, transport=transport)
+    summary["collection"] = collect_due(
+        session,
+        settings,
+        transport=transport,
+        release_between_fetches=True,
+    )
 
     if _maintenance_due(session, settings):
         summary["maintenance"] = evaluate_all(session)

@@ -18,12 +18,23 @@
         <tr><th>last seen</th><td class="small">{{ doc.last_seen_at }} ({{ doc.retrieval_count }}×)</td></tr>
         <tr><th>http status</th><td>{{ doc.http_status }}</td></tr>
         <tr><th>content type</th><td class="small">{{ doc.content_type }}</td></tr>
+        <tr><th>detected type</th><td class="small">{{ doc.detected_content_type or 'pending detection' }}</td></tr>
+        {% if doc.original_filename %}<tr><th>filename</th><td class="small">{{ doc.original_filename }}</td></tr>{% endif %}
         <tr><th>size</th><td>{{ '{:,}'.format(doc.size_bytes) }} bytes</td></tr>
         <tr><th>sha-256</th><td class="mono small">{{ doc.content_hash }}</td></tr>
         <tr><th>raw path</th><td class="mono small">data/raw/{{ doc.raw_storage_path }}</td></tr>
         <tr><th>collector</th><td class="small">{{ doc.collector_version }}</td></tr>
+        <tr><th>processing</th><td>
+          <span class="badge text-bg-{{ 'success' if processing and processing.status == 'succeeded' else 'warning' if processing and processing.status == 'partial' else 'secondary' }}">{{ processing.status if processing else 'pending' }}</span>
+          {% if processing %}<span class="small">{{ processing.extraction_method }} · {{ processing.pipeline_version }}</span>{% endif %}
+        </td></tr>
       </tbody>
     </table>
+    <div class="d-flex gap-2 mb-3">
+      <a class="btn btn-sm btn-outline-primary" href="/api/documents/{{ doc.id }}/raw">Download immutable original</a>
+      {% if processing and processing.manifest_path %}<a class="btn btn-sm btn-outline-secondary" href="/api/documents/{{ doc.id }}/manifest">View extraction manifest</a>{% endif %}
+      <form method="post" action="/evidence/{{ doc.id }}/process"><button class="btn btn-sm btn-outline-secondary">Process / retry</button></form>
+    </div>
     <h6>Access policy at retrieval</h6>
     <pre class="json">{{ doc.access_policy_snapshot | tojson(indent=2) }}</pre>
     <h6>Targeting context at retrieval</h6>
@@ -34,12 +45,38 @@
     {% endif %}
   </div>
   <div class="col-lg-7">
-    <h6>Content preview {% if preview %}<span class="text-secondary small">(first 40 KB, escaped)</span>{% endif %}</h6>
+    <h6>Content preview {% if preview %}<span class="text-secondary small">(first 40,000 extracted characters)</span>{% endif %}</h6>
+    {% if is_image %}
+      <img src="/api/documents/{{ doc.id }}/raw?inline=true" class="img-fluid border rounded mb-3"
+           alt="Collected evidence image {{ doc.original_filename or doc.content_hash[:12] }}">
+    {% endif %}
     {% if preview %}
       <pre class="json" style="max-height: 42rem">{{ preview | safe }}</pre>
     {% else %}
-      <p class="text-secondary">Binary or non-text content — inspect the raw file at
-        <code class="mono">data/raw/{{ doc.raw_storage_path }}</code>.</p>
+      <p class="text-secondary">No extracted text is available. The immutable original remains downloadable.</p>
+    {% endif %}
+    {% if processing and (processing.warnings or processing.error) %}
+      <h6 class="mt-3">Processing notes</h6>
+      {% if processing.error %}<div class="alert alert-warning py-2 small">{{ processing.error }}</div>{% endif %}
+      <ul class="small">{% for warning in processing.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if processing_runs %}
+      <h6 class="mt-3">Versioned processing history</h6>
+      <table class="table table-sm small"><thead><tr><th>created</th><th>version</th><th>status</th><th>text</th><th>pages</th></tr></thead><tbody>
+      {% for run in processing_runs %}<tr><td>{{ run.created_at }}</td><td class="mono">{{ run.pipeline_version }}</td><td>{{ run.status }}</td><td>{{ run.text_chars or 0 }}</td><td>{{ run.page_count or '—' }}</td></tr>{% endfor %}
+      </tbody></table>
+    {% endif %}
+    {% if references %}
+      <h6 class="mt-3">Discovered evidence references</h6>
+      <ul class="list-group list-group-flush small">
+      {% for reference in references %}<li class="list-group-item px-0">
+        <span class="badge text-bg-secondary">{{ reference.reference_kind }}</span>
+        <span class="badge text-bg-light">{{ reference.decision }}</span>
+        {% set context = reference.context or {} %}
+        <a href="{{ reference.target_url }}" target="_blank" rel="noopener">{{ context.get('caption') or context.get('alt_text') or context.get('anchor_text') or reference.target_url }}</a>
+        {% if reference.child_document_id %} · <a href="/evidence/{{ reference.child_document_id }}">collected child</a>{% endif %}
+      </li>{% endfor %}
+      </ul>
     {% endif %}
   </div>
 </div>

@@ -16,7 +16,14 @@ from sqlalchemy.orm import Session
 
 from heatseeker_source_registry import COLLECTOR_VERSION
 from heatseeker_source_registry.distill import distill_document
-from heatseeker_source_registry.fetch import FetchTooLargeError, fetch_url
+from heatseeker_source_registry.document_pipeline import enqueue_document_processing
+from heatseeker_source_registry.document_processing import detect_media_type
+from heatseeker_source_registry.fetch import (
+    FetchRedirectBlockedError,
+    FetchTooLargeError,
+    fetch_url,
+    response_filename,
+)
 from heatseeker_source_registry.models import (
     SourceCoverage,
     SourceDefinition,
@@ -28,6 +35,7 @@ from heatseeker_source_registry.policy import (
     policy_snapshot,
     robots_enforced,
 )
+from heatseeker_source_registry.publication import extract_claimed_published_at
 from heatseeker_source_registry.rawstore import store_bytes
 from heatseeker_source_registry.targeting import match_coverage, serialize_coverage
 
@@ -159,8 +167,14 @@ def collect_source(
     transport: httpx.BaseTransport | None = None,
     coverage_id: str | None = None,
     scope_snapshot: dict | None = None,
+    release_before_fetch: bool = False,
 ) -> dict:
-    """Fetch one source endpoint. Returns an outcome dict (also the job result)."""
+    """Fetch one source endpoint. Returns an outcome dict (also the job result).
+
+    Worker paths set ``release_before_fetch`` so no SQLite read/write transaction spans
+    network I/O. Tests and callers with intentionally uncommitted fixtures can retain the
+    legacy single-transaction behavior.
+    """
     source = session.get(SourceDefinition, source_id)
     if source is None:
         return {"outcome": "error", "error": "source not found"}
@@ -188,8 +202,6 @@ def collect_source(
     if source.access_method == "manual" or not url:
         return {"outcome": "skipped", "error": "manual-only source — add evidence by hand"}
 
-    source.fetch_attempts += 1
-
     # Conditional GET against the last retrieval of this URL.
     latest = session.scalars(
         select(SourceDocument)
@@ -200,18 +212,41 @@ def collect_source(
         .order_by(SourceDocument.retrieved_at.desc())
         .limit(1)
     ).first()
+    latest_id = latest.id if latest else None
+    latest_etag = latest.etag if latest else None
+    latest_last_modified = latest.last_modified if latest else None
+    if release_before_fetch:
+        session.rollback()
 
     try:
         result = fetch_url(
             settings,
             url,
-            etag=latest.etag if latest else None,
-            last_modified=latest.last_modified if latest else None,
+            etag=latest_etag,
+            last_modified=latest_last_modified,
             transport=transport,
         )
-    except (httpx.HTTPError, FetchTooLargeError) as exc:
+    except (httpx.HTTPError, FetchTooLargeError, FetchRedirectBlockedError) as exc:
+        if release_before_fetch:
+            source = session.get(SourceDefinition, source_id)
+            if source is None:
+                return {"outcome": "error", "error": "source removed during collection"}
+        source.fetch_attempts += 1
         _record_failure(session, source, f"{type(exc).__name__}: {exc}")
         return {"outcome": "failure", "error": str(exc)}
+
+    if release_before_fetch:
+        source = session.get(SourceDefinition, source_id)
+        if source is None:
+            return {"outcome": "error", "error": "source removed during collection"}
+        coverage = session.get(SourceCoverage, coverage_id) if coverage_id else None
+        if coverage_id and coverage is None:
+            return {"outcome": "error", "error": "coverage removed during collection"}
+        latest = session.get(SourceDocument, latest_id) if latest_id else None
+        blockers = activation_blockers(source, coverage, enforce_robots=enforce_robots)
+        if blockers:
+            return {"outcome": "blocked", "error": "; ".join(blockers)}
+    source.fetch_attempts += 1
 
     if result.not_modified and latest is not None:
         latest.last_seen_at = utc_now()
@@ -221,6 +256,7 @@ def collect_source(
         if latest.source_coverage_id is None and coverage is not None:
             latest.source_coverage_id = coverage.id
         _record_success(source)
+        enqueue_document_processing(session, settings, latest)
         return {
             "outcome": "unchanged",
             "document_id": latest.id,
@@ -229,6 +265,9 @@ def collect_source(
             "source_coverage_id": coverage.id if coverage else None,
             "coverage_ids": latest.targeting_snapshot["coverage_ids"],
         }
+    if result.not_modified:
+        _record_failure(session, source, "HTTP 304 received but prior evidence disappeared")
+        return {"outcome": "failure", "error": "304 without prior evidence"}
 
     if result.status_code in (429, 503):
         seconds = _record_throttle(session, source, result.retry_after)
@@ -258,6 +297,7 @@ def collect_source(
         if duplicate.source_coverage_id is None and coverage is not None:
             duplicate.source_coverage_id = coverage.id
         _record_success(source)
+        enqueue_document_processing(session, settings, duplicate)
         return {
             "outcome": "duplicate",
             "document_id": duplicate.id,
@@ -274,6 +314,18 @@ def collect_source(
         canonical_url=result.final_url if result.final_url != url else None,
         content_hash=digest,
         content_type=result.content_type,
+        detected_content_type=detect_media_type(
+            result.content,
+            result.content_type,
+            response_filename(result.content_disposition, result.final_url),
+        ),
+        content_disposition=result.content_disposition,
+        original_filename=response_filename(result.content_disposition, result.final_url),
+        claimed_published_at=(
+            extract_claimed_published_at(result.content)
+            if "html" in (result.content_type or "").lower()
+            else None
+        ),
         size_bytes=len(result.content),
         raw_storage_path=rel_path,
         http_status=result.status_code,
@@ -291,6 +343,7 @@ def collect_source(
     session.add(document)
     session.flush()
     distill_document(settings, document, result.content)  # token-lean text pipe
+    enqueue_document_processing(session, settings, document)
     _record_success(source, new_document=True)
     audit.record(
         session,

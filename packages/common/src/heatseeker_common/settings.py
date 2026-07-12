@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     crawler_user_agent: str = "HeatseekerResearch/0.1 (local industry research tool)"
     fetch_timeout_seconds: float = 20.0
     fetch_max_bytes: int = 10 * 1024 * 1024
+    fetch_document_max_bytes: int = 50 * 1024 * 1024
+    fetch_image_max_bytes: int = 20 * 1024 * 1024
+    evidence_upload_max_bytes: int = 50 * 1024 * 1024
     # Politeness + storage economy (spec §11.5; ADR-0011)
     politeness_delay_seconds: float = 2.0
     politeness_jitter_seconds: float = 1.5
@@ -58,9 +61,25 @@ class Settings(BaseSettings):
     crawl_max_depth: int = 2
     crawl_max_new_domains: int = 10
     crawl_stale_streak_stop: int = 8
+    crawl_max_documents: int = 20
+    crawl_max_images: int = 30
+    crawl_max_images_per_page: int = 12
     # Frontier rows older than this are re-queued on the next crawl so change
     # detection keeps working over time (re-fetches dedupe by content hash).
     crawl_recrawl_hours: float = 24.0
+    # Derived evidence processing. Raw input is always preserved first; these bounds
+    # limit work performed on untrusted PDFs, OOXML containers, and images.
+    document_max_pages: int = 250
+    document_max_extracted_chars: int = 2_000_000
+    document_zip_max_entries: int = 2_000
+    document_zip_max_uncompressed_bytes: int = 100 * 1024 * 1024
+    document_zip_max_ratio: float = 100.0
+    image_max_pixels: int = 40_000_000
+    image_max_frames: int = 10
+    # OCR and semantic vision require explicit providers. They remain off when no real
+    # provider is configured; metadata-only processing must continue to work.
+    evidence_ocr_enabled: bool = False
+    evidence_vision_enabled: bool = False
 
     @field_validator("log_level")
     @classmethod
@@ -88,6 +107,34 @@ class Settings(BaseSettings):
         parts = urlsplit(value)
         if parts.scheme not in {"http", "https", "socks5", "socks5h"} or not parts.hostname:
             raise ValueError("fetch_proxy_url must be an absolute HTTP(S) or SOCKS5 URL")
+        return value
+
+    @field_validator(
+        "crawl_max_documents",
+        "crawl_max_images",
+        "crawl_max_images_per_page",
+        "document_max_pages",
+        "document_max_extracted_chars",
+        "document_zip_max_entries",
+        "document_zip_max_uncompressed_bytes",
+        "image_max_pixels",
+        "image_max_frames",
+        "fetch_max_bytes",
+        "fetch_document_max_bytes",
+        "fetch_image_max_bytes",
+        "evidence_upload_max_bytes",
+    )
+    @classmethod
+    def _positive_evidence_limit(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("evidence collection and processing limits must be positive")
+        return value
+
+    @field_validator("document_zip_max_ratio")
+    @classmethod
+    def _positive_zip_ratio(cls, value: float) -> float:
+        if value <= 1:
+            raise ValueError("document_zip_max_ratio must be greater than 1")
         return value
 
     @property

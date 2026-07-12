@@ -8,7 +8,7 @@ from heatseeker_core_domain.geography import excluded_by, in_scope, parse_jurisd
 from heatseeker_industry_packs.loader import default_packs_root, load_pack
 from heatseeker_source_registry import rawstore
 from heatseeker_source_registry.collect import collect_source
-from heatseeker_source_registry.fetch import http_client_kwargs
+from heatseeker_source_registry.fetch import fetch_url, http_client_kwargs
 from heatseeker_source_registry.models import (
     RobotsStatus,
     SourceDefinition,
@@ -26,6 +26,7 @@ from heatseeker_source_registry.scopes import (
 )
 from heatseeker_source_registry.sync import sync_pack_seeds
 from heatseeker_source_registry.targeting import CoverageSpec, TargetSpec, upsert_coverage
+from sqlalchemy import text
 
 
 def _make_source(session, **overrides) -> str:
@@ -57,6 +58,18 @@ def test_proxy_helper_routes_real_fetches_but_test_transport_wins(settings):
     assert http_client_kwargs(settings, None) == {"proxy": "http://proxy.example:8080"}
     transport = _transport(lambda _request: httpx.Response(200))
     assert http_client_kwargs(settings, transport) == {"transport": transport}
+
+
+def test_fetch_tolerates_malformed_content_length(settings):
+    transport = _transport(
+        lambda _request: httpx.Response(
+            200,
+            content=b"evidence",
+            headers={"Content-Length": "unknown"},
+        )
+    )
+    result = fetch_url(settings, "https://example.org/evidence", transport=transport)
+    assert result.content == b"evidence"
 
 
 # --- Seed sync ---------------------------------------------------------------
@@ -165,6 +178,29 @@ def test_collect_ignore_mode_is_auditable(engine, settings):
         assert document.access_policy_snapshot["robots_status"] == RobotsStatus.DISALLOWED
         assert document.access_policy_snapshot["robots_enforced"] is False
         assert document.access_policy_snapshot["robots_override_applied"] is True
+
+
+def test_worker_collection_releases_sqlite_transaction_during_fetch(engine, settings):
+    with session_scope(engine) as session:
+        source_id = _make_source(session)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE source_definition SET updated_at = updated_at WHERE id = :id"),
+                {"id": source_id},
+            )
+        return httpx.Response(200, content=b"evidence", headers={"Content-Type": "text/plain"})
+
+    with session_scope(engine) as session:
+        result = collect_source(
+            session,
+            settings,
+            source_id,
+            transport=_transport(handler),
+            release_before_fetch=True,
+        )
+        assert result["outcome"] == "collected"
 
 
 # --- Evidence preservation and dedupe -------------------------------------------

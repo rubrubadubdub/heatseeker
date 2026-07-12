@@ -201,6 +201,14 @@
   </div>
   <div class="col-lg-7">
     <h6>Collected documents ({{ documents | length }})</h6>
+    <form method="post" action="/sources/{{ source.id }}/evidence/upload"
+          enctype="multipart/form-data" class="card card-body py-2 mb-2">
+      <div class="d-flex gap-2 align-items-center flex-wrap">
+        <label class="small mb-0" for="evidence-file">Add PDF, Office document, image, or text evidence</label>
+        <input class="form-control form-control-sm w-auto" id="evidence-file" type="file" name="file" required>
+        <button class="btn btn-sm btn-outline-primary">Upload evidence</button>
+      </div>
+    </form>
     <div class="table-responsive">
       <table class="table table-sm small">
         <thead><tr><th>retrieved</th><th>url</th><th>type</th><th>size</th><th>seen</th></tr></thead>

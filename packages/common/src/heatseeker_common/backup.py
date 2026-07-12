@@ -1,7 +1,8 @@
 """Backup and restore (spec §29.3, §29.5).
 
-Backup: consistent online snapshot via SQLite `VACUUM INTO` + copy of the raw-evidence
-store. Restore: replaces the live DB file — the API and worker must be stopped first;
+Backup: consistent online snapshot via SQLite `VACUUM INTO` + copies of raw evidence and
+versioned processed artifacts. Restore: replaces the live DB file — the API and worker
+must be stopped first;
 the current DB is set aside (never deleted) before the backup copy lands.
 """
 
@@ -39,6 +40,11 @@ def create_backup(settings: Settings) -> Path:
         shutil.copytree(settings.raw_dir, dest / "raw")
         raw_included = True
 
+    processed_included = False
+    if settings.processed_dir.exists() and any(settings.processed_dir.iterdir()):
+        shutil.copytree(settings.processed_dir, dest / "processed")
+        processed_included = True
+
     snapshot = sqlite3.connect(dest / DB_NAME)
     try:
         row = snapshot.execute("SELECT version_num FROM alembic_version").fetchone()
@@ -52,6 +58,7 @@ def create_backup(settings: Settings) -> Path:
         "created_at": utc_now().isoformat(),
         "database_file": DB_NAME,
         "raw_included": raw_included,
+        "processed_included": processed_included,
         "alembic_version": alembic_version,
         "app_version": __version__,
     }
@@ -127,4 +134,7 @@ def restore_backup(settings: Settings, backup_path: Path, force: bool = False) -
     backup_raw = backup_path / "raw"
     if backup_raw.exists():
         shutil.copytree(backup_raw, settings.raw_dir, dirs_exist_ok=True)
+    backup_processed = backup_path / "processed"
+    if backup_processed.exists():
+        shutil.copytree(backup_processed, settings.processed_dir, dirs_exist_ok=True)
     return target

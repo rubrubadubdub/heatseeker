@@ -10,10 +10,11 @@ from heatseeker_source_registry.models import (
     RobotsStatus,
     SourceDefinition,
     SourceDocument,
+    SourceDocumentReference,
     SourceLifecycle,
     TermsStatus,
 )
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 HOST = "https://scaffco.example"
 
@@ -238,6 +239,7 @@ def test_diminishing_returns_stops_stale_crawl(engine, settings):
 
 def test_unreachable_robots_is_conservative(engine, settings):
     settings.robots_policy = "enforce"
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
             return httpx.Response(500)
@@ -274,3 +276,134 @@ def test_ignore_mode_treats_robots_as_advisory(engine, settings):
         assert summary["pages_fetched"] == 2
     assert "/private/secret" in requested
     assert "/robots.txt" not in requested
+
+
+def test_crawler_collects_documents_and_images_with_parent_context(engine, settings):
+    requested: list[str] = []
+    page = b"""
+    <h1>Bridge renewal</h1>
+    <figure><img src="/project.jpg" alt="Scaffold around bridge">
+      <figcaption>North approach works, May 2026</figcaption></figure>
+    <a href="/capability.pdf">Capability statement</a>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(request.url.path)
+        if request.url.path == "/":
+            return httpx.Response(200, content=page, headers={"Content-Type": "text/html"})
+        if request.url.path == "/project.jpg":
+            return httpx.Response(
+                200, content=b"jpeg evidence", headers={"Content-Type": "image/jpeg"}
+            )
+        if request.url.path == "/capability.pdf":
+            return httpx.Response(
+                200, content=b"%PDF evidence", headers={"Content-Type": "application/pdf"}
+            )
+        return httpx.Response(404)
+
+    with session_scope(engine) as session:
+        source_id = _make_source(session)
+        summary = crawl_source(
+            session,
+            settings,
+            source_id,
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+        )
+        assert summary["pages_fetched"] == 1
+        assert summary["documents_fetched"] == 1
+        assert summary["images_fetched"] == 1
+    assert {"/", "/project.jpg", "/capability.pdf"} <= set(requested)
+
+    with session_scope(engine) as session:
+        references = list(
+            session.scalars(
+                select(SourceDocumentReference).order_by(SourceDocumentReference.ordinal)
+            )
+        )
+        assert {reference.reference_kind for reference in references} == {"document", "image"}
+        image = next(reference for reference in references if reference.reference_kind == "image")
+        assert image.context["alt_text"] == "Scaffold around bridge"
+        assert image.context["caption"] == "North approach works, May 2026"
+        assert image.child_document_id is not None
+        assert all(reference.decision == "fetched" for reference in references)
+        purposes = set(session.scalars(select(CrawlFrontier.purpose)))
+        assert {"collection", "document", "image"} <= purposes
+
+
+def test_external_assets_are_recorded_but_not_fetched(engine, settings):
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(
+            200,
+            content=b'<img src="https://cdn.example/project.jpg" alt="external">',
+            headers={"Content-Type": "text/html"},
+        )
+
+    with session_scope(engine) as session:
+        source_id = _make_source(session)
+        crawl_source(
+            session,
+            settings,
+            source_id,
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+        )
+    assert all("cdn.example" not in url for url in requested)
+    with session_scope(engine) as session:
+        reference = session.scalars(select(SourceDocumentReference)).one()
+        assert reference.decision == "external_not_fetched"
+        assert reference.child_document_id is None
+
+
+def test_redirect_cannot_escape_reviewed_source_hosts(engine, settings):
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.host == "scaffco.example":
+            return httpx.Response(302, headers={"Location": "https://escape.example/evidence"})
+        raise AssertionError("off-origin redirect was fetched")
+
+    with session_scope(engine) as session:
+        source_id = _make_source(session)
+        summary = crawl_source(
+            session,
+            settings,
+            source_id,
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+        )
+        assert summary["blocked"] == 1
+        row = session.scalars(select(CrawlFrontier)).one()
+        assert row.status == FrontierStatus.BLOCKED
+        assert "redirect blocked" in row.outcome
+    assert all("escape.example" not in url for url in requested)
+
+
+def test_worker_crawl_releases_sqlite_transaction_during_fetch(engine, settings):
+    with session_scope(engine) as session:
+        source_id = _make_source(session)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE source_definition SET updated_at = updated_at WHERE id = :id"),
+                {"id": source_id},
+            )
+        return httpx.Response(
+            200, content=b"<p>evidence</p>", headers={"Content-Type": "text/html"}
+        )
+
+    with session_scope(engine) as session:
+        summary = crawl_source(
+            session,
+            settings,
+            source_id,
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+            release_between_fetches=True,
+        )
+        assert summary["pages_fetched"] == 1

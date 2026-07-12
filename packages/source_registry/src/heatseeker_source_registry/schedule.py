@@ -80,13 +80,22 @@ def collect_due(
     limit: int | None = None,
     transport: httpx.BaseTransport | None = None,
     sleeper=time.sleep,
+    release_between_fetches: bool = False,
 ) -> dict:
     """Collect every due source with inter-request politeness delays (jittered; a touch
     longer when consecutive requests hit the same host)."""
     batch = due_sources(session, limit or settings.collect_due_batch_limit)
+    batch_snapshot = [(source.id, source.name) for source in batch]
+    if release_between_fetches:
+        # Persist any preceding autopilot changes and end the read snapshot before I/O.
+        session.commit()
     outcomes: dict[str, str] = {}
     previous_host: str | None = None
-    for index, source in enumerate(batch):
+    for index, (source_id, source_name) in enumerate(batch_snapshot):
+        source = session.get(SourceDefinition, source_id)
+        if source is None:
+            outcomes[source_name] = "removed"
+            continue
         url = collection_url(source)
         host = urlsplit(url).netloc if url else None
         if index > 0:
@@ -98,10 +107,22 @@ def collect_due(
             sleeper(delay)
         previous_host = host
 
-        result = collect_source(session, settings, source.id, transport=transport)
-        outcomes[source.name] = result["outcome"]
+        result = collect_source(
+            session,
+            settings,
+            source.id,
+            transport=transport,
+            release_before_fetch=release_between_fetches,
+        )
+        outcomes[source_name] = result["outcome"]
+        source = session.get(SourceDefinition, source_id)
+        if source is None:
+            continue
         update_cadence(source, result["outcome"])
-        session.flush()
+        if release_between_fetches:
+            session.commit()
+        else:
+            session.flush()
 
     summary: dict[str, int] = {}
     for outcome in outcomes.values():

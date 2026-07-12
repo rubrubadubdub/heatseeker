@@ -6,6 +6,8 @@ from logging import Logger
 
 from sqlalchemy.engine import Engine
 
+from heatseeker_common.settings import Settings
+
 
 class PermanentJobError(RuntimeError):
     """A deterministic payload/entity error that must not be retried."""
@@ -19,6 +21,7 @@ class JobContext:
     attempt: int
     engine: Engine
     logger: Logger
+    settings: Settings
 
 
 JobHandler = Callable[[JobContext], dict | None]

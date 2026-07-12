@@ -7,6 +7,7 @@ can always be regenerated (versioned via DISTILLER_VERSION).
 """
 
 import gzip
+import hashlib
 import re
 
 from heatseeker_common.settings import Settings
@@ -60,7 +61,8 @@ def html_to_text(raw: bytes) -> str:
 
 
 def distilled_rel_path(content_hash: str) -> str:
-    return f"{content_hash[:2]}/{content_hash[2:4]}/{content_hash}.txt.gz"
+    version = hashlib.sha256(DISTILLER_VERSION.encode()).hexdigest()[:12]
+    return f"{content_hash[:2]}/{content_hash[2:4]}/{content_hash}/distill-{version}.txt.gz"
 
 
 def distill_document(settings: Settings, document: SourceDocument, raw: bytes) -> bool:
@@ -89,7 +91,8 @@ def distill_document(settings: Settings, document: SourceDocument, raw: bytes) -
 def read_distilled(settings: Settings, document: SourceDocument) -> str | None:
     if not document.distilled_path:
         return None
-    path = settings.processed_dir / document.distilled_path
-    if not path.is_file():
+    root = settings.processed_dir.resolve()
+    path = (root / document.distilled_path).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
         return None
     return gzip.decompress(path.read_bytes()).decode("utf-8")

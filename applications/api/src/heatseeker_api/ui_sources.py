@@ -4,9 +4,10 @@ import html
 import json
 import re
 import uuid
+from typing import Annotated
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Form, Query, Request
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from heatseeker_common import audit, jobs
 from heatseeker_common.db import session_scope
@@ -18,7 +19,6 @@ from heatseeker_industry_packs.loader import (
     discover_packs,
     load_pack,
 )
-from heatseeker_source_registry import rawstore
 from heatseeker_source_registry.identity import (
     attach_identity,
     resolve_identities,
@@ -906,8 +906,51 @@ def source_relationship_create(
 # --- Evidence --------------------------------------------------------------------
 
 
+@router.post("/sources/{source_id}/evidence/upload")
+def evidence_upload(
+    request: Request,
+    source_id: str,
+    file: Annotated[UploadFile, File()],
+):
+    from heatseeker_source_registry.manual_evidence import add_manual_file
+
+    limit = request.app.state.settings.evidence_upload_max_bytes
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := file.file.read(min(1024 * 1024, limit - total + 1)):
+        total += len(chunk)
+        if total > limit:
+            return _redirect(
+                f"/sources/{source_id}",
+                f"Upload exceeds {limit:,} bytes",
+                "danger",
+            )
+        chunks.append(chunk)
+    with session_scope(request.app.state.engine) as session:
+        source = session.get(SourceDefinition, source_id)
+        if source is None:
+            return _redirect("/sources", "Source not found", "danger")
+        try:
+            document, created = add_manual_file(
+                session,
+                request.app.state.settings,
+                source,
+                b"".join(chunks),
+                filename=file.filename or "evidence.bin",
+                content_type=file.content_type,
+                actor="ui",
+            )
+        except ValueError as exc:
+            return _redirect(f"/sources/{source_id}", str(exc), "danger")
+        document_id = document.id
+    message = "Evidence uploaded and processing queued" if created else "Evidence already existed"
+    return _redirect(f"/evidence/{document_id}", message)
+
+
 @router.get("/evidence", response_class=HTMLResponse)
 def evidence_page(request: Request):
+    from heatseeker_source_registry.document_pipeline import latest_processing_run
+
     with session_scope(request.app.state.engine) as session:
         rows = list(
             session.execute(
@@ -920,13 +963,34 @@ def evidence_page(request: Request):
                 .limit(100)
             ).all()
         )
-        documents = [{"doc": doc, "source_name": name} for doc, name in rows]
+        documents = [
+            {
+                "doc": doc,
+                "source_name": name,
+                "processing": latest_processing_run(session, doc.id),
+            }
+            for doc, name in rows
+        ]
         session.expunge_all()
-    return _render(request, "evidence.html", active="evidence", documents=documents)
+    return _render(
+        request,
+        "evidence.html",
+        active="evidence",
+        documents=documents,
+        ocr_status=(
+            "unavailable" if request.app.state.settings.evidence_ocr_enabled else "disabled"
+        ),
+        vision_status=(
+            "unavailable" if request.app.state.settings.evidence_vision_enabled else "disabled"
+        ),
+    )
 
 
 @router.get("/evidence/{document_id}", response_class=HTMLResponse)
 def evidence_detail(request: Request, document_id: str):
+    from heatseeker_source_registry.document_pipeline import latest_processing_run, read_run_text
+    from heatseeker_source_registry.models import DocumentProcessingRun, SourceDocumentReference
+
     settings = request.app.state.settings
     with session_scope(request.app.state.engine) as session:
         document = session.get(SourceDocument, document_id)
@@ -940,16 +1004,35 @@ def evidence_detail(request: Request, document_id: str):
             )
         source = session.get(SourceDefinition, document.source_definition_id)
         source_name = source.name if source else "?"
+        processing = latest_processing_run(session, document.id)
+        processing_runs = list(
+            session.scalars(
+                select(DocumentProcessingRun)
+                .where(DocumentProcessingRun.source_document_id == document.id)
+                .order_by(DocumentProcessingRun.created_at.desc())
+            )
+        )
+        references = list(
+            session.scalars(
+                select(SourceDocumentReference)
+                .where(SourceDocumentReference.parent_document_id == document.id)
+                .order_by(SourceDocumentReference.ordinal)
+            )
+        )
+        try:
+            extracted_text = read_run_text(settings, processing) if processing else None
+        except FileNotFoundError:
+            extracted_text = None
         session.expunge_all()
 
-    preview = None
-    content_type = (document.content_type or "").lower()
-    if any(t in content_type for t in ("text", "html", "xml", "json", "rss")):
-        try:
-            raw = rawstore.read_bytes(settings, document.raw_storage_path)
-            preview = html.escape(raw[:40_000].decode("utf-8", errors="replace"))
-        except FileNotFoundError:
-            preview = "(raw content missing from store)"
+    preview = html.escape(extracted_text[:40_000]) if extracted_text else None
+    content_type = (document.detected_content_type or document.content_type or "").lower()
+    is_image = content_type.split(";", 1)[0] in {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+    }
     return _render(
         request,
         "evidence_detail.html",
@@ -957,7 +1040,30 @@ def evidence_detail(request: Request, document_id: str):
         doc=document,
         source_name=source_name,
         preview=preview,
+        processing=processing,
+        processing_runs=processing_runs,
+        references=references,
+        is_image=is_image,
     )
+
+
+@router.post("/evidence/{document_id}/process")
+def evidence_process(request: Request, document_id: str):
+    from heatseeker_source_registry.document_pipeline import enqueue_document_processing
+
+    with session_scope(request.app.state.engine) as session:
+        document = session.get(SourceDocument, document_id)
+        if document is None:
+            return _redirect("/evidence", "Document not found", "danger")
+        job = enqueue_document_processing(
+            session,
+            request.app.state.settings,
+            document,
+            actor="ui",
+            priority=PriorityClass.INTERACTIVE,
+        )
+    message = "Document processing queued" if job else "Current processing result already exists"
+    return _redirect(f"/evidence/{document_id}", message)
 
 
 # --- Research scopes ----------------------------------------------------------------

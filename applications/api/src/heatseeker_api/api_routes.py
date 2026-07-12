@@ -10,11 +10,11 @@ import re
 import uuid
 from collections import defaultdict
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 from heatseeker_common import audit
 from heatseeker_common import jobs as job_queue
 from heatseeker_common.db import session_scope
@@ -1102,17 +1102,21 @@ def api_collect_source(request: Request, source_id: str, payload: SourceCollectR
                     detail="coverage does not match the selected research scope",
                 )
         scope_snapshot = _scope_to_dict(scope) if scope else None
+        job_payload = {
+            "schema_version": 2,
+            "source_id": source.id,
+            "coverage_id": coverage.id if coverage else None,
+            "pairing_ids": [coverage.id] if coverage else [],
+            "scope_id": scope.id if scope else None,
+            "scope_snapshot": scope_snapshot,
+        }
+    # A fresh write transaction avoids SQLite WAL read-snapshot upgrade failures when
+    # the worker commits between validation and enqueue.
+    with session_scope(request.app.state.engine) as session:
         job = job_queue.enqueue(
             session,
             "sources.collect",
-            payload={
-                "schema_version": 2,
-                "source_id": source.id,
-                "coverage_id": coverage.id if coverage else None,
-                "pairing_ids": [coverage.id] if coverage else [],
-                "scope_id": scope.id if scope else None,
-                "scope_snapshot": scope_snapshot,
-            },
+            payload=job_payload,
             priority=PriorityClass.INTERACTIVE,
             actor="api",
         )
@@ -1554,6 +1558,7 @@ def api_list_documents(
     coverage_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
 ) -> list[dict]:
+    from heatseeker_source_registry.document_pipeline import latest_processing_run
     from heatseeker_source_registry.models import SourceDocument
 
     stmt = select(SourceDocument).order_by(SourceDocument.retrieved_at.desc()).limit(limit)
@@ -1562,34 +1567,152 @@ def api_list_documents(
     if coverage_id:
         stmt = stmt.where(SourceDocument.source_coverage_id == coverage_id)
     with session_scope(request.app.state.engine) as session:
-        return [
-            {
-                "id": d.id,
-                "source_definition_id": d.source_definition_id,
-                "source_coverage_id": d.source_coverage_id,
-                "source_url": d.source_url,
-                "retrieved_at": d.retrieved_at,
-                "content_hash": d.content_hash,
-                "content_type": d.content_type,
-                "size_bytes": d.size_bytes,
-                "retrieval_count": d.retrieval_count,
-                "http_status": d.http_status,
-                "targeting_snapshot": d.targeting_snapshot,
-            }
-            for d in session.scalars(stmt)
-        ]
+        rows = []
+        for d in session.scalars(stmt):
+            processing = latest_processing_run(session, d.id)
+            rows.append(
+                {
+                    "id": d.id,
+                    "source_definition_id": d.source_definition_id,
+                    "source_coverage_id": d.source_coverage_id,
+                    "source_url": d.source_url,
+                    "retrieved_at": d.retrieved_at,
+                    "content_hash": d.content_hash,
+                    "content_type": d.content_type,
+                    "detected_content_type": d.detected_content_type,
+                    "original_filename": d.original_filename,
+                    "size_bytes": d.size_bytes,
+                    "retrieval_count": d.retrieval_count,
+                    "http_status": d.http_status,
+                    "targeting_snapshot": d.targeting_snapshot,
+                    "processing_status": processing.status if processing else "pending",
+                    "processing_run_id": processing.id if processing else None,
+                }
+            )
+        return rows
 
 
-@router.get("/documents/{document_id}/text")
-def api_document_text(
-    request: Request, document_id: str, max_chars: int = Query(default=20000, ge=100, le=200000)
-) -> dict:
-    """Token-lean distilled text for a document — the preferred pipe for AI/agents.
+@router.get("/evidence/capabilities")
+def api_evidence_capabilities(request: Request) -> dict:
+    settings = request.app.state.settings
+    return {
+        "native_extraction": [
+            "html",
+            "xml",
+            "json",
+            "csv",
+            "plain_text",
+            "pdf",
+            "docx",
+            "xlsx",
+            "pptx",
+            "image_metadata",
+        ],
+        "ocr": {
+            "enabled": settings.evidence_ocr_enabled,
+            "available": False,
+            "status": "unavailable" if settings.evidence_ocr_enabled else "disabled",
+        },
+        "vision": {
+            "enabled": settings.evidence_vision_enabled,
+            "available": False,
+            "status": "unavailable" if settings.evidence_vision_enabled else "disabled",
+        },
+        "policy": (
+            "OCR and semantic vision require configured, audited providers; no visual "
+            "claim is promoted to a fact automatically."
+        ),
+    }
 
-    Distils on demand for documents collected before distillation existed.
-    """
+
+def _processing_run_to_dict(run) -> dict:
+    return {
+        "id": run.id,
+        "pipeline_version": run.pipeline_version,
+        "config_hash": run.config_hash,
+        "status": run.status,
+        "detected_content_type": run.detected_content_type,
+        "filename": run.filename,
+        "extraction_method": run.extraction_method,
+        "text_chars": run.text_chars,
+        "page_count": run.page_count,
+        "metadata": run.processing_metadata,
+        "warnings": run.warnings,
+        "error": run.error,
+        "created_at": run.created_at,
+        "finished_at": run.finished_at,
+    }
+
+
+@router.get("/documents/{document_id}")
+def api_document_detail(request: Request, document_id: str) -> dict:
+    from heatseeker_source_registry.models import (
+        DocumentProcessingRun,
+        SourceDocument,
+        SourceDocumentReference,
+    )
+
+    with session_scope(request.app.state.engine) as session:
+        document = session.get(SourceDocument, document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        runs = list(
+            session.scalars(
+                select(DocumentProcessingRun)
+                .where(DocumentProcessingRun.source_document_id == document_id)
+                .order_by(DocumentProcessingRun.created_at.desc())
+            )
+        )
+        references = list(
+            session.scalars(
+                select(SourceDocumentReference)
+                .where(SourceDocumentReference.parent_document_id == document_id)
+                .order_by(SourceDocumentReference.ordinal)
+            )
+        )
+        return {
+            "id": document.id,
+            "source_definition_id": document.source_definition_id,
+            "source_coverage_id": document.source_coverage_id,
+            "source_url": document.source_url,
+            "canonical_url": document.canonical_url,
+            "retrieved_at": document.retrieved_at,
+            "content_hash": document.content_hash,
+            "content_type": document.content_type,
+            "detected_content_type": document.detected_content_type,
+            "content_disposition": document.content_disposition,
+            "original_filename": document.original_filename,
+            "size_bytes": document.size_bytes,
+            "retrieval_count": document.retrieval_count,
+            "access_policy_snapshot": document.access_policy_snapshot,
+            "targeting_snapshot": document.targeting_snapshot,
+            "processing_runs": [_processing_run_to_dict(run) for run in runs],
+            "references": [
+                {
+                    "id": reference.id,
+                    "child_document_id": reference.child_document_id,
+                    "target_url": reference.target_url,
+                    "reference_kind": reference.reference_kind,
+                    "discovery_rule": reference.discovery_rule,
+                    "ordinal": reference.ordinal,
+                    "context": reference.context,
+                    "extractor_version": reference.extractor_version,
+                    "decision": reference.decision,
+                }
+                for reference in references
+            ],
+        }
+
+
+@router.get("/documents/{document_id}/raw")
+def api_document_raw(
+    request: Request,
+    document_id: str,
+    inline: bool = Query(default=False),
+) -> Response:
+    from urllib.parse import quote
+
     from heatseeker_source_registry import rawstore
-    from heatseeker_source_registry.distill import distill_document, read_distilled
     from heatseeker_source_registry.models import SourceDocument
 
     settings = request.app.state.settings
@@ -1597,15 +1720,150 @@ def api_document_text(
         document = session.get(SourceDocument, document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="document not found")
-        text = read_distilled(settings, document)
+        try:
+            raw = rawstore.read_bytes(settings, document.raw_storage_path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=410, detail="raw content missing") from None
+        if rawstore.content_address(raw) != document.content_hash:
+            raise HTTPException(status_code=409, detail="raw content hash mismatch")
+        media_type = (
+            document.detected_content_type or document.content_type or "application/octet-stream"
+        )
+        safe_inline = media_type.split(";", 1)[0].lower() in {
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+        }
+        disposition = "inline" if inline and safe_inline else "attachment"
+        filename = document.original_filename or f"evidence-{document.content_hash[:12]}.bin"
+        headers = {
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(filename)}",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Cache-Control": "private, immutable",
+        }
+        served_type = media_type if safe_inline else "application/octet-stream"
+        return Response(raw, media_type=served_type, headers=headers)
+
+
+@router.get("/documents/{document_id}/manifest")
+def api_document_manifest(request: Request, document_id: str) -> dict:
+    import json
+
+    from heatseeker_source_registry.document_pipeline import latest_processing_run
+    from heatseeker_source_registry.document_processing import read_processed_output
+    from heatseeker_source_registry.models import SourceDocument
+
+    with session_scope(request.app.state.engine) as session:
+        if session.get(SourceDocument, document_id) is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        run = latest_processing_run(session, document_id)
+        if run is None:
+            raise HTTPException(status_code=409, detail="document processing pending")
+        if not run.manifest_path:
+            raise HTTPException(status_code=410, detail="processing manifest missing")
+        try:
+            payload = read_processed_output(
+                request.app.state.settings.processed_dir,
+                run.manifest_path,
+            )
+        except FileNotFoundError:
+            raise HTTPException(status_code=410, detail="processing manifest missing") from None
+        return json.loads(payload)
+
+
+@router.post("/documents/{document_id}/process", status_code=202)
+def api_process_document(request: Request, document_id: str) -> dict:
+    from heatseeker_source_registry.document_pipeline import (
+        enqueue_document_processing,
+        latest_processing_run,
+    )
+    from heatseeker_source_registry.models import SourceDocument
+
+    with session_scope(request.app.state.engine) as session:
+        document = session.get(SourceDocument, document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        job = enqueue_document_processing(
+            session,
+            request.app.state.settings,
+            document,
+            actor="api",
+            priority=PriorityClass.INTERACTIVE,
+        )
+        current = latest_processing_run(session, document_id)
+        return {
+            "document_id": document_id,
+            "queued": job is not None,
+            "job_id": job.id if job else None,
+            "current": _processing_run_to_dict(current) if current else None,
+        }
+
+
+@router.post("/sources/{source_id}/documents", status_code=201)
+async def api_upload_document(
+    request: Request,
+    source_id: str,
+    file: Annotated[UploadFile, File()],
+) -> dict:
+    from heatseeker_source_registry.manual_evidence import add_manual_file
+
+    limit = request.app.state.settings.evidence_upload_max_bytes
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(min(1024 * 1024, limit - total + 1)):
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail=f"upload exceeds {limit} bytes")
+        chunks.append(chunk)
+    with session_scope(request.app.state.engine) as session:
+        source = session.get(SourceDefinition, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="source not found")
+        try:
+            document, created = add_manual_file(
+                session,
+                request.app.state.settings,
+                source,
+                b"".join(chunks),
+                filename=file.filename or "evidence.bin",
+                content_type=file.content_type,
+                actor="api",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"document_id": document.id, "created": created}
+
+
+@router.get("/documents/{document_id}/text")
+def api_document_text(
+    request: Request, document_id: str, max_chars: int = Query(default=20000, ge=100, le=200000)
+) -> dict:
+    """Read existing derived text without mutating state in a GET request."""
+    from heatseeker_source_registry.distill import read_distilled
+    from heatseeker_source_registry.document_pipeline import latest_processing_run, read_run_text
+    from heatseeker_source_registry.models import SourceDocument
+
+    settings = request.app.state.settings
+    with session_scope(request.app.state.engine) as session:
+        document = session.get(SourceDocument, document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        run = latest_processing_run(session, document_id)
+        try:
+            text = read_run_text(settings, run) if run is not None else None
+            if text is None:
+                text = read_distilled(settings, document)
+        except FileNotFoundError:
+            raise HTTPException(status_code=410, detail="processed text missing") from None
         if text is None:
-            try:
-                raw = rawstore.read_bytes(settings, document.raw_storage_path)
-            except FileNotFoundError:
-                raise HTTPException(status_code=410, detail="raw content missing") from None
-            if not distill_document(settings, document, raw):
-                raise HTTPException(status_code=415, detail="not distillable (binary content)")
-            text = read_distilled(settings, document)
+            if run is None:
+                raise HTTPException(status_code=409, detail="document processing pending")
+            raise HTTPException(
+                status_code=415,
+                detail=f"document has no extractable text ({run.status})",
+            )
         truncated = len(text) > max_chars
         return {
             "document_id": document.id,

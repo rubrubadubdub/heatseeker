@@ -22,13 +22,20 @@ from heatseeker_common import audit
 from heatseeker_common.settings import Settings
 from heatseeker_common.timeutil import utc_now
 from protego import Protego
-from selectolax.parser import HTMLParser
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from heatseeker_source_registry import COLLECTOR_VERSION
 from heatseeker_source_registry.distill import distill_document
-from heatseeker_source_registry.fetch import FetchTooLargeError, fetch_url, http_client_kwargs
+from heatseeker_source_registry.document_pipeline import enqueue_document_processing
+from heatseeker_source_registry.document_processing import detect_media_type
+from heatseeker_source_registry.fetch import (
+    FetchRedirectBlockedError,
+    FetchTooLargeError,
+    fetch_url,
+    http_client_kwargs,
+    response_filename,
+)
 from heatseeker_source_registry.identity import (
     SourceIdentityConflict,
     attach_identity,
@@ -41,30 +48,16 @@ from heatseeker_source_registry.models import (
     FrontierStatus,
     SourceDefinition,
     SourceDocument,
+    SourceDocumentReference,
     SourceLifecycle,
 )
 from heatseeker_source_registry.policy import activation_blockers, policy_snapshot, robots_enforced
+from heatseeker_source_registry.publication import extract_claimed_published_at
 from heatseeker_source_registry.rawstore import store_bytes
-
-_SKIP_EXTENSIONS = (
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".svg",
-    ".webp",
-    ".ico",
-    ".css",
-    ".js",
-    ".zip",
-    ".gz",
-    ".mp4",
-    ".mp3",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".exe",
-    ".dmg",
+from heatseeker_source_registry.references import (
+    REFERENCE_EXTRACTOR_VERSION,
+    ReferenceCandidate,
+    extract_references,
 )
 
 
@@ -76,6 +69,9 @@ class CrawlBudget:
     max_depth: int = 2
     max_new_domains: int = 10
     stale_streak_stop: int = 8  # consecutive non-novel pages that end the run
+    max_documents: int = 20
+    max_images: int = 30
+    max_images_per_page: int = 12
 
     @classmethod
     def from_settings(cls, settings: Settings, **overrides) -> "CrawlBudget":
@@ -84,6 +80,9 @@ class CrawlBudget:
             "max_depth": settings.crawl_max_depth,
             "max_new_domains": settings.crawl_max_new_domains,
             "stale_streak_stop": settings.crawl_stale_streak_stop,
+            "max_documents": settings.crawl_max_documents,
+            "max_images": settings.crawl_max_images,
+            "max_images_per_page": settings.crawl_max_images_per_page,
         }
         values.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**values)
@@ -96,9 +95,16 @@ class _RunState:
     unchanged: int = 0
     blocked: int = 0
     failed: int = 0
+    documents_fetched: int = 0
+    images_fetched: int = 0
+    references_discovered: int = 0
+    documents_queued: int = 0
+    images_queued: int = 0
     proposed_sources: list[str] = field(default_factory=list)
     stale_streak: int = 0
     stopped_reason: str | None = None
+    page_budget_hit: bool = False
+    stale_limit_hit: bool = False
 
 
 class RobotsCache:
@@ -222,21 +228,126 @@ def _parse_sitemap(content: bytes, base_url: str) -> tuple[list[str], list[str]]
     return pages, nested
 
 
-def _extract_links(base_url: str, raw: bytes) -> list[tuple[str, str]]:
-    """(absolute_url, anchor_text) pairs from an HTML page."""
-    links: list[tuple[str, str]] = []
-    tree = HTMLParser(raw)
-    for node in tree.css("a[href]"):
-        href = node.attributes.get("href") or ""
-        if href.startswith(("#", "mailto:", "tel:", "javascript:")):
-            continue
-        absolute = urljoin(base_url, href)
-        if not absolute.startswith(("http://", "https://")):
-            continue
-        if urlsplit(absolute).path.lower().endswith(_SKIP_EXTENSIONS):
-            continue
-        links.append((absolute, node.text(strip=True) or ""))
-    return links
+def _reference_context(candidate: ReferenceCandidate) -> dict:
+    return {
+        key: value
+        for key, value in {
+            "raw_url": candidate.raw_url,
+            "source_attribute": candidate.source_attribute,
+            "anchor_text": candidate.anchor_text,
+            "alt_text": candidate.alt_text,
+            "title_text": candidate.title_text,
+            "caption": candidate.caption,
+            "nearby_heading": candidate.nearby_heading,
+            "declared_type": candidate.declared_type,
+            "srcset_descriptor": candidate.srcset_descriptor,
+        }.items()
+        if value is not None
+    }
+
+
+def _record_and_enqueue_references(
+    session: Session,
+    source: SourceDefinition,
+    parent: SourceDocument,
+    row: CrawlFrontier,
+    references: list[ReferenceCandidate],
+    *,
+    allowed_hosts: set[str],
+    vocabulary: list[str],
+    state: _RunState,
+    budget: CrawlBudget,
+) -> None:
+    """Persist every DOM occurrence, then enqueue bounded same-origin targets."""
+    for candidate in references:
+        state.references_discovered += 1
+        host = urlsplit(candidate.url).netloc
+        decision = "external_not_fetched"
+        child_id = None
+
+        if host in allowed_hosts:
+            purpose = candidate.kind if candidate.kind in {"document", "image"} else "collection"
+            if candidate.kind == "navigation" and row.depth >= budget.max_depth:
+                decision = "depth_limit"
+            else:
+                queued = enqueue_url(
+                    session,
+                    source,
+                    candidate.url,
+                    discovered_via="link",
+                    purpose=purpose,
+                    depth=row.depth + 1,
+                    parent_url=row.url,
+                    priority=40 if purpose == "document" else 70 if purpose == "image" else 50,
+                    discovery_rule=candidate.rule,
+                )
+                decision = "queued" if queued is not None else "known"
+                if queued is not None:
+                    queued.expected_content = candidate.expected_content
+                    if purpose == "document":
+                        state.documents_queued += 1
+                    elif purpose == "image":
+                        state.images_queued += 1
+                else:
+                    existing = session.scalars(
+                        select(CrawlFrontier).where(
+                            CrawlFrontier.source_definition_id == source.id,
+                            CrawlFrontier.normalised_url == candidate.normalised_url,
+                        )
+                    ).first()
+                    child_id = existing.document_id if existing else None
+        elif candidate.kind == "navigation" and _matches_vocabulary(
+            f"{candidate.anchor_text or ''} {candidate.url}", vocabulary
+        ):
+            _propose_external_source(
+                session,
+                source,
+                candidate.url,
+                candidate.anchor_text or "",
+                state,
+                budget,
+            )
+            decision = "source_proposed"
+
+        existing_reference = session.scalars(
+            select(SourceDocumentReference).where(
+                SourceDocumentReference.parent_document_id == parent.id,
+                SourceDocumentReference.extractor_version == REFERENCE_EXTRACTOR_VERSION,
+                SourceDocumentReference.reference_kind == candidate.kind,
+                SourceDocumentReference.ordinal == candidate.ordinal,
+            )
+        ).first()
+        if existing_reference is None:
+            session.add(
+                SourceDocumentReference(
+                    parent_document_id=parent.id,
+                    child_document_id=child_id,
+                    target_url=candidate.url,
+                    normalised_url=candidate.normalised_url,
+                    reference_kind=candidate.kind,
+                    discovery_rule=candidate.rule,
+                    ordinal=candidate.ordinal,
+                    context=_reference_context(candidate),
+                    extractor_version=REFERENCE_EXTRACTOR_VERSION,
+                    decision=decision,
+                )
+            )
+
+
+def _link_references_to_child(
+    session: Session, source: SourceDefinition, row: CrawlFrontier, child: SourceDocument
+) -> None:
+    for reference in session.scalars(
+        select(SourceDocumentReference).where(
+            SourceDocumentReference.child_document_id.is_(None),
+            SourceDocumentReference.normalised_url == row.normalised_url,
+        )
+    ):
+        parent = session.get(SourceDocument, reference.parent_document_id)
+        if parent is not None and parent.source_definition_id == source.id:
+            reference.child_document_id = child.id
+            if reference.decision in {"queued", "known"}:
+                reference.decision = "fetched"
 
 
 def _propose_external_source(
@@ -330,6 +441,7 @@ def _store_page(
     if duplicate is not None:
         duplicate.last_seen_at = utc_now()
         duplicate.retrieval_count += 1
+        enqueue_document_processing(session, settings, duplicate)
         return duplicate, False, False
     document = SourceDocument(
         source_definition_id=source.id,
@@ -337,6 +449,18 @@ def _store_page(
         canonical_url=result.final_url if result.final_url != url else None,
         content_hash=digest,
         content_type=result.content_type,
+        detected_content_type=detect_media_type(
+            result.content,
+            result.content_type,
+            response_filename(result.content_disposition, result.final_url),
+        ),
+        content_disposition=result.content_disposition,
+        original_filename=response_filename(result.content_disposition, result.final_url),
+        claimed_published_at=(
+            extract_claimed_published_at(result.content)
+            if "html" in (result.content_type or "").lower()
+            else None
+        ),
         size_bytes=len(result.content),
         raw_storage_path=rel_path,
         http_status=result.status_code,
@@ -359,6 +483,7 @@ def _store_page(
     session.add(document)
     session.flush()
     distill_document(settings, document, result.content)
+    enqueue_document_processing(session, settings, document)
     return document, True, not hash_seen
 
 
@@ -369,6 +494,7 @@ def crawl_source(
     transport: httpx.BaseTransport | None = None,
     budget: CrawlBudget | None = None,
     sleeper=time.sleep,
+    release_between_fetches: bool = False,
 ) -> dict:
     """Crawl one source's site within budgets. Returns a run summary (job result)."""
     source = session.get(SourceDefinition, source_id)
@@ -388,6 +514,15 @@ def crawl_source(
     robots = RobotsCache(settings, transport)
     vocabulary = _vocabulary_terms(session, source)
     home_host = urlsplit(source.base_url).netloc
+    allowed_hosts = {home_host}
+    endpoint = (source.collection_scope or {}).get("endpoint_url")
+    if endpoint:
+        allowed_hosts.add(urlsplit(endpoint).netloc)
+    for origin in (source.collection_scope or {}).get("allowed_origins", []):
+        allowed_hosts.add(urlsplit(origin).netloc)
+
+    def redirect_allowed(url: str) -> bool:
+        return urlsplit(url).netloc in allowed_hosts and (not enforce_robots or robots.allowed(url))
 
     # Re-open stale frontier rows so repeat crawls keep detecting change over time.
     # BLOCKED rows are re-queued too: robots is re-evaluated every run, so a still-
@@ -424,13 +559,19 @@ def crawl_source(
             depth=0,
             priority=5,
         )
+    if release_between_fetches:
+        session.commit()
+
+    def checkpoint() -> None:
+        if release_between_fetches:
+            session.commit()
 
     first_request = True
-    while state.pages_fetched < budget.max_pages:
+    while True:
         row = session.scalars(
             select(CrawlFrontier)
             .where(
-                CrawlFrontier.source_definition_id == source.id,
+                CrawlFrontier.source_definition_id == source_id,
                 CrawlFrontier.status == FrontierStatus.QUEUED,
             )
             .order_by(CrawlFrontier.priority, CrawlFrontier.depth, CrawlFrontier.enqueued_at)
@@ -439,14 +580,47 @@ def crawl_source(
         if row is None:
             state.stopped_reason = "frontier exhausted"
             break
-        if state.stale_streak >= budget.stale_streak_stop:
-            state.stopped_reason = "diminishing returns (stale streak)"
-            break
+        if row.purpose == "image" and state.images_fetched >= budget.max_images:
+            row.status = FrontierStatus.SKIPPED
+            row.outcome = "image budget reached"
+            checkpoint()
+            continue
+        if row.purpose == "document" and state.documents_fetched >= budget.max_documents:
+            row.status = FrontierStatus.SKIPPED
+            row.outcome = "document budget reached"
+            checkpoint()
+            continue
+        if row.purpose not in {"image", "document"} and state.pages_fetched >= budget.max_pages:
+            row.status = FrontierStatus.SKIPPED
+            row.outcome = "page budget reached"
+            state.page_budget_hit = True
+            checkpoint()
+            continue
+        if (
+            row.purpose not in {"image", "document"}
+            and state.stale_streak >= budget.stale_streak_stop
+        ):
+            row.status = FrontierStatus.SKIPPED
+            row.outcome = "diminishing returns"
+            state.stale_limit_hit = True
+            checkpoint()
+            continue
 
-        if enforce_robots and not robots.allowed(row.url):
+        row_id = row.id
+        row_url = row.url
+        row_purpose = row.purpose
+        if release_between_fetches:
+            session.rollback()
+
+        if enforce_robots and not robots.allowed(row_url):
+            if release_between_fetches:
+                row = session.get(CrawlFrontier, row_id)
+                if row is None:
+                    continue
             row.status = FrontierStatus.BLOCKED
             row.outcome = "robots disallow"
             state.blocked += 1
+            checkpoint()
             continue
 
         if not first_request:
@@ -454,24 +628,78 @@ def crawl_source(
         first_request = False
 
         try:
-            result = fetch_url(settings, row.url, transport=transport)
+            result = fetch_url(
+                settings,
+                row_url,
+                transport=transport,
+                max_bytes=(
+                    settings.fetch_image_max_bytes
+                    if row_purpose == "image"
+                    else settings.fetch_document_max_bytes
+                    if row_purpose == "document"
+                    else settings.fetch_max_bytes
+                ),
+                redirect_validator=redirect_allowed,
+            )
+        except FetchRedirectBlockedError as exc:
+            if release_between_fetches:
+                row = session.get(CrawlFrontier, row_id)
+                if row is None:
+                    continue
+            row.status = FrontierStatus.BLOCKED
+            row.outcome = f"redirect blocked: {exc}"[:200]
+            row.fetched_at = utc_now()
+            state.blocked += 1
+            checkpoint()
+            continue
         except (httpx.HTTPError, FetchTooLargeError) as exc:
+            if release_between_fetches:
+                row = session.get(CrawlFrontier, row_id)
+                if row is None:
+                    continue
             row.status = FrontierStatus.FAILED
             row.outcome = f"{type(exc).__name__}: {exc}"[:200]
             row.fetched_at = utc_now()
             state.failed += 1
+            checkpoint()
             continue
 
+        if release_between_fetches:
+            row = session.get(CrawlFrontier, row_id)
+            source = session.get(SourceDefinition, source_id)
+            if row is None or source is None:
+                continue
+
         row.fetched_at = utc_now()
-        state.pages_fetched += 1
+        if row.purpose == "image":
+            state.images_fetched += 1
+        elif row.purpose == "document":
+            state.documents_fetched += 1
+        else:
+            state.pages_fetched += 1
 
         if result.status_code >= 400:
             row.status = FrontierStatus.FAILED
             row.outcome = f"HTTP {result.status_code}"
             state.failed += 1
+            checkpoint()
             continue
 
         if row.purpose == "sitemap":
+            document, is_new, _novel = _store_page(
+                session,
+                settings,
+                source,
+                row.url,
+                result,
+                enforce_robots=enforce_robots,
+            )
+            row.document_id = document.id
+            _link_references_to_child(session, source, row, document)
+            if is_new:
+                state.new_documents += 1
+            else:
+                state.unchanged += 1
             pages, nested = _parse_sitemap(result.content, row.url)
             for nested_url in nested[:5]:
                 enqueue_url(
@@ -497,6 +725,7 @@ def crawl_source(
                     )
             row.status = FrontierStatus.FETCHED
             row.outcome = f"sitemap: {len(pages)} urls, {len(nested)} nested"
+            checkpoint()
             continue
 
         document, is_new, novel = _store_page(
@@ -509,39 +738,49 @@ def crawl_source(
         )
         row.status = FrontierStatus.FETCHED
         row.document_id = document.id
+        _link_references_to_child(session, source, row, document)
         row.outcome = "new content" if is_new else "unchanged"
         if is_new:
             state.new_documents += 1
         else:
             state.unchanged += 1
-        if novel:
-            state.stale_streak = 0
-        else:
-            state.stale_streak += 1
+        if row.purpose not in {"image", "document"}:
+            if novel:
+                state.stale_streak = 0
+            else:
+                state.stale_streak += 1
 
         # Link extraction: internal links extend the frontier; external, vocabulary-
         # matched domains become proposed sources (transitive discovery).
-        if is_new and "html" in (result.content_type or "") and row.depth < budget.max_depth:
-            for link_url, anchor in _extract_links(
-                str(result.final_url or row.url), result.content
-            ):
-                link_host = urlsplit(link_url).netloc
-                if link_host == home_host:
-                    enqueue_url(
-                        session,
-                        source,
-                        link_url,
-                        discovered_via="link",
-                        depth=row.depth + 1,
-                        parent_url=row.url,
-                        priority=50,
-                    )
-                elif _matches_vocabulary(f"{anchor} {link_url}", vocabulary):
-                    _propose_external_source(session, source, link_url, anchor, state, budget)
+        if "html" in (result.content_type or ""):
+            references = extract_references(
+                str(result.final_url or row.url),
+                result.content,
+                max_images_per_page=budget.max_images_per_page,
+            )
+            _record_and_enqueue_references(
+                session,
+                source,
+                document,
+                row,
+                references,
+                allowed_hosts=allowed_hosts,
+                vocabulary=vocabulary,
+                state=state,
+                budget=budget,
+            )
+        checkpoint()
 
-    if state.stopped_reason is None:
+    if state.stale_limit_hit:
+        state.stopped_reason = "diminishing returns (stale streak)"
+    elif state.page_budget_hit:
         state.stopped_reason = "page budget reached"
+    elif state.stopped_reason is None:
+        state.stopped_reason = "frontier exhausted"
 
+    source = session.get(SourceDefinition, source_id)
+    if source is None:
+        return {"outcome": "error", "error": "source removed during crawl"}
     source.last_success_at = utc_now() if state.pages_fetched else source.last_success_at
     summary = {
         "outcome": "crawled",
@@ -551,6 +790,11 @@ def crawl_source(
         "unchanged": state.unchanged,
         "blocked": state.blocked,
         "failed": state.failed,
+        "documents_fetched": state.documents_fetched,
+        "images_fetched": state.images_fetched,
+        "references_discovered": state.references_discovered,
+        "documents_queued": state.documents_queued,
+        "images_queued": state.images_queued,
         "proposed_sources": state.proposed_sources,
         "stopped": state.stopped_reason,
     }

@@ -4,11 +4,15 @@
 <h1 class="h3 mb-2">Evidence</h1>
 <p class="small text-secondary">Immutable raw documents, content-addressed by SHA-256.
 Every retrieval records the access policy it was collected under. Re-fetches of identical
-content bump the seen-count instead of duplicating.</p>
+content bump the seen-count instead of duplicating. PDF, Office, text, and image evidence
+is signature-detected and processed into versioned derived artifacts.</p>
+<p class="small text-secondary">OCR: <strong>{{ ocr_status }}</strong> · semantic vision:
+<strong>{{ vision_status }}</strong>. Native extraction and image metadata continue without
+them; machine interpretation is never presented as a confirmed fact.</p>
 
 <div class="table-responsive">
   <table class="table table-sm align-middle">
-    <thead><tr><th>retrieved</th><th>source</th><th>coverage</th><th>url</th><th>type</th><th>size</th><th>hash</th><th>seen</th></tr></thead>
+    <thead><tr><th>retrieved</th><th>source</th><th>coverage</th><th>url/file</th><th>type</th><th>processing</th><th>size</th><th>hash</th><th>seen</th></tr></thead>
     <tbody>
       {% for row in documents %}
       {% set d = row.doc %}
@@ -16,14 +20,15 @@ content bump the seen-count instead of duplicating.</p>
         <td><a href="/evidence/{{ d.id }}">{{ d.retrieved_at.strftime('%Y-%m-%d %H:%M:%S') }}</a></td>
         <td class="small">{{ row.source_name }}</td>
         <td class="mono small">{{ (d.source_coverage_id or 'unscoped')[:12] }}</td>
-        <td class="small text-truncate" style="max-width: 20rem">{{ d.source_url }}</td>
-        <td class="small">{{ (d.content_type or '?').split(';')[0] }}</td>
+        <td class="small text-truncate" style="max-width: 20rem">{{ d.original_filename or d.source_url }}</td>
+        <td class="small" title="declared: {{ d.content_type or '?' }}">{{ (d.detected_content_type or d.content_type or '?').split(';')[0] }}</td>
+        <td><span class="badge text-bg-{{ 'success' if row.processing and row.processing.status == 'succeeded' else 'warning' if row.processing and row.processing.status == 'partial' else 'secondary' }}">{{ row.processing.status if row.processing else 'pending' }}</span></td>
         <td class="small">{{ '{:,}'.format(d.size_bytes) }} B</td>
         <td class="mono small">{{ d.content_hash[:12] }}</td>
         <td>{{ d.retrieval_count }}×</td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="text-secondary">No evidence collected yet — activate a
+      <tr><td colspan="9" class="text-secondary">No evidence collected yet — activate a
         source and click <em>collect now</em> on the <a href="/sources">Sources</a> page.</td></tr>
       {% endfor %}
     </tbody>

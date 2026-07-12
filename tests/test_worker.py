@@ -20,6 +20,25 @@ def test_worker_once_processes_echo_job(engine, settings):
         assert done.result == {"echo": {"hello": "world"}}
 
 
+def test_long_running_handler_refreshes_job_heartbeat(engine, settings, monkeypatch):
+    calls: list[str] = []
+    original = jobs.heartbeat
+
+    def recording_heartbeat(session, job_id):
+        calls.append(job_id)
+        return original(session, job_id)
+
+    monkeypatch.setattr(jobs, "heartbeat", recording_heartbeat)
+    settings.worker_heartbeat_interval = 0.01
+    settings.stale_job_seconds = 0.3
+    with session_scope(engine) as session:
+        job = jobs.enqueue(session, "demo.sleep", payload={"seconds": 0.25})
+        job_id = job.id
+
+    run_worker(settings, once=True, worker_id="heartbeat-test")
+    assert job_id in calls
+
+
 def test_worker_registers_and_deregisters(engine, settings):
     run_worker(settings, once=True, worker_id="test-worker-reg")
     with session_scope(engine) as session:

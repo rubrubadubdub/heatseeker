@@ -71,7 +71,31 @@ def validate_collection_scope(value: dict | None) -> dict | None:
             raise CoverageValidationError("collection endpoint_url must be an absolute HTTP(S) URL")
         if parts.username or parts.password:
             raise CoverageValidationError("collection endpoint_url must not contain credentials")
-    return dict(value)
+    result = dict(value)
+    allowed_origins = value.get("allowed_origins", [])
+    if not isinstance(allowed_origins, list) or len(allowed_origins) > 20:
+        raise CoverageValidationError("collection allowed_origins must be a list of at most 20")
+    normalised_origins: list[str] = []
+    for origin in allowed_origins:
+        if not isinstance(origin, str):
+            raise CoverageValidationError("each allowed origin must be a string")
+        parts = urlsplit(origin.strip())
+        if (
+            parts.scheme not in {"http", "https"}
+            or not parts.hostname
+            or parts.username
+            or parts.password
+            or parts.path not in {"", "/"}
+            or parts.query
+            or parts.fragment
+        ):
+            raise CoverageValidationError(
+                "allowed origins must be HTTP(S) origins without credentials or paths"
+            )
+        normalised_origins.append(f"{parts.scheme}://{parts.netloc.lower()}")
+    if normalised_origins:
+        result["allowed_origins"] = sorted(set(normalised_origins))
+    return result
 
 
 def normalise_dimension(value: str) -> str:

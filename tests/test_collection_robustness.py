@@ -225,3 +225,16 @@ def test_distilled_storage_is_compressed(engine, settings):
         stored = settings.processed_dir / document.distilled_path
         assert stored.suffix == ".gz"
         assert len(gzip.decompress(stored.read_bytes())) == document.distilled_chars
+
+
+def test_raw_store_deduplicates_across_mime_variants(settings):
+    settings.ensure_data_dirs()
+    body = b"same evidence bytes " * 100
+    first, digest = rawstore.store_bytes(settings, body, "text/plain")
+    second, second_digest = rawstore.store_bytes(settings, body, "application/octet-stream")
+
+    assert second == first
+    assert second_digest == digest
+    assert rawstore.read_bytes(settings, first) == body
+    stored = [path for path in settings.raw_dir.rglob("*") if path.is_file()]
+    assert len(stored) == 1

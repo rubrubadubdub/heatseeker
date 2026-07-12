@@ -9,23 +9,28 @@ from sqlalchemy import delete, select
 
 
 def test_backup_and_restore_roundtrip(engine, settings):
-    # Seed identifiable state: one job row + one raw-evidence file.
+    # Seed identifiable state: one job row + raw and derived evidence files.
     with session_scope(engine) as session:
         job = jobs.enqueue(session, "demo.echo", payload={"marker": "precious"})
         job_id = job.id
     raw_file = settings.raw_dir / "ab" / "evidence.txt"
     raw_file.parent.mkdir(parents=True, exist_ok=True)
     raw_file.write_text("original evidence", encoding="utf-8")
+    processed_file = settings.processed_dir / "ab" / "evidence.txt.gz"
+    processed_file.parent.mkdir(parents=True, exist_ok=True)
+    processed_file.write_text("versioned derived evidence", encoding="utf-8")
 
     backup_dir = backup.create_backup(settings)
     manifest = json.loads((backup_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["raw_included"] is True
+    assert manifest["processed_included"] is True
     assert manifest["alembic_version"] is not None
 
     # Destroy state: delete all jobs and the raw file.
     with session_scope(engine) as session:
         session.execute(delete(Job))
     raw_file.unlink()
+    processed_file.unlink()
     engine.dispose()  # release the DB file before replacing it (Windows requirement)
 
     backup.restore_backup(settings, backup_dir)
@@ -39,6 +44,7 @@ def test_backup_and_restore_roundtrip(engine, settings):
     finally:
         restored_engine.dispose()
     assert raw_file.read_text(encoding="utf-8") == "original evidence"
+    assert processed_file.read_text(encoding="utf-8") == "versioned derived evidence"
 
 
 def test_restore_sets_current_db_aside(engine, settings):

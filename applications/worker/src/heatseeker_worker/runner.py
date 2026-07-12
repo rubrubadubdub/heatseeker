@@ -177,7 +177,38 @@ class WorkerRunner:
             attempt=attempt,
             engine=self.engine,
             logger=logger,
+            settings=self.settings,
         )
+        heartbeat_stop = threading.Event()
+
+        def keep_job_alive() -> None:
+            interval = max(
+                0.1,
+                min(
+                    self.settings.worker_heartbeat_interval,
+                    self.settings.stale_job_seconds / 3,
+                ),
+            )
+            while not heartbeat_stop.wait(interval):
+                try:
+                    with session_scope(self.engine) as session:
+                        jobs.heartbeat(session, job_id)
+                        registration = session.get(WorkerRegistration, self.worker_id)
+                        if registration is not None:
+                            registration.heartbeat_at = utc_now()
+                except Exception:
+                    logger.warning(
+                        "job heartbeat failed",
+                        extra={"job_id": job_id, "worker_id": self.worker_id},
+                        exc_info=True,
+                    )
+
+        heartbeat_thread = threading.Thread(
+            target=keep_job_alive,
+            name=f"heatseeker-heartbeat-{job_id[:8]}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
         try:
             result = handler(ctx)
         except PermanentJobError:
@@ -201,6 +232,9 @@ class WorkerRunner:
             logger.info(
                 "job succeeded", extra={"job_id": job_id, "job_type": job_type, "attempt": attempt}
             )
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=1.0)
 
 
 def run_worker(
