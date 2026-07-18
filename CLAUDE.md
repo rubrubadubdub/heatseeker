@@ -35,8 +35,14 @@ mandatory evidence chain (Observation→FactAssertion) with field-level inspecta
 confidence (§17), multi-axis classifications, capability status ladder, size bands
 (honest `unresolved`), research gaps, immutable-scope CSV/ZIP bulk import with conservative
 identity/authority handling (`/discovery`), and the merge-safe profile workspace on
-`/entities/{id}`. 253 tests green. M6 (projects, relationships,
-graph) next — builds on M5.
+`/entities/{id}`. **M6 projects, relationships & graph is done**
+(`heatseeker_knowledge_graph`, migration 0017): projects + typed participation,
+directed evidence-backed relationships (end keeps dates, retract keeps the row),
+derived co-participation edges, bounded multi-hop queries with per-hop confidence,
+`/projects` workspace + entity "Connections" section + `/api/graph/*`. A **guided
+operating layer** wraps it all: dashboard "Next steps" checklist + one-click
+`pipeline.advance` job, and orientation intros on dense pages — keep new features
+wired into `guidance.py`. 266 tests green. M7 (news, events, macro signals) next.
 Check [docs/roadmap.md](docs/roadmap.md) for milestone status before starting any work.
 Dev loop: `uv sync` · `uv run pytest -q` · `uv run ruff check .` · `uv run heatseeker run`
 User launch path: `Heatseeker.bat` (repo root) / desktop shortcut → `heatseeker run`

@@ -21,7 +21,8 @@ detail: read the spec section for the milestone via
 | — | Agentic Source Scout (Codex/Claude plans, scope, budgets, schedules, proposals, optional policy-cleared auto-crawl) | **Done** (2026-07-12; ADR-0014) | — | Early M11 vertical slice; migration 0013 |
 | M4 | Entity core & resolution | **Done** (2026-07-12; adversarially refined same day) | [M4-entities.md](milestones/M4-entities.md) | Multi-key blocking; priority dimensions; exact pointer/candidate reversal audit; ancestry + decision-bypass guards; nothing auto-merges |
 | M5 | Company discovery & profile | **Done** (2026-07-12; adversarially hardened same day) | [M5-discovery-profiles.md](milestones/M5-discovery-profiles.md) | Merge-safe evidence chain; conservative identity matching/authority; immutable scope snapshots; CSV/ZIP pack-claim discovery; durable failure audit (migrations 0015–0016) |
-| M6 | Projects, relationships, graph | Not started | — | |
+| M6 | Projects, relationships, graph | **Done** (2026-07-13, acceptance verified) | [M6-projects-graph.md](milestones/M6-projects-graph.md) | Relational graph (§23.3); edges never deleted — end keeps dates, retract keeps audit; derived co-participation edges; BFS paths with per-hop confidence |
+| — | Guided operating layer (dashboard next-steps checklist, `pipeline.advance` one-click job, page orientation intros) | **Done** (2026-07-13) | — | Hand-holding with granular controls intact; wire new features into `guidance.py` |
 | M7 | News, events, macro signals | Not started | — | |
 | M8 | Lead intelligence | Not started | — | |
 | M9 | Macro market workspace | Not started | — | |
