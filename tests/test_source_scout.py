@@ -4,7 +4,7 @@ import json
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
-from heatseeker_ai.contracts import CandidateSource, SourceExpansionResult
+from heatseeker_ai.contracts import CandidateSource, CoverageSuggestion, SourceExpansionResult
 from heatseeker_ai.models import (
     ActivationMode,
     AIInvocation,
@@ -54,6 +54,10 @@ class FakeProvider:
                     authority_tier=3,
                     originating_query="scaffolding directory AU",
                     supporting_urls=["https://search.example/result"],
+                    suggested_coverage=[
+                        CoverageSuggestion(dimension="geo", targets=["Australia"]),
+                        CoverageSuggestion(dimension="segment", targets=["commercial_scaffolding"]),
+                    ],
                 )
             ],
             coverage_gaps=["No Tasmania-specific directory found"],
@@ -110,6 +114,10 @@ def test_fake_provider_run_creates_audited_proposal_with_scope(engine, settings)
 
         assert run.status == ScoutRunStatus.SUCCEEDED
         assert proposal.status == ProposalStatus.PROPOSED
+        assert proposal.suggested_coverage == [
+            {"dimension": "geo", "targets": ["Australia"]},
+            {"dimension": "segment", "targets": ["commercial_scaffolding"]},
+        ]
         assert source.lifecycle_status == "proposed"
         assert source.authority_tier == 6
         assert {target.dimension for target in coverage.targets} == {"industry", "region"}

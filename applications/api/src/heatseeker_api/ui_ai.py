@@ -209,12 +209,20 @@ def source_scout_run_detail(request: Request, run_id: str):
                 title="Scout run not found",
                 detail=f"No source-scout run with id {run_id}",
             )
+        job = session.get(Job, run.job_id) if run.job_id else None
         session.expunge_all()
+    elapsed_seconds = None
+    if run.status in ("queued", "running"):
+        reference = run.started_at or run.created_at
+        if reference is not None:
+            elapsed_seconds = max(0, int((utc_now() - reference).total_seconds()))
     return _render(
         request,
         "source_scout_run.html",
         active="source_scout",
         run=run,
+        job=job,
+        elapsed_seconds=elapsed_seconds,
     )
 
 

@@ -226,7 +226,7 @@ def _create_proposal(
         confidence=candidate.confidence,
         originating_query=candidate.originating_query,
         supporting_urls=[str(url) for url in candidate.supporting_urls],
-        suggested_coverage=candidate.suggested_coverage,
+        suggested_coverage=[coverage.model_dump() for coverage in candidate.suggested_coverage],
     )
     session.add(proposal)
     session.flush()
