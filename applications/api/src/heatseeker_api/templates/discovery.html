@@ -3,7 +3,7 @@
 {% block content %}
 <h1 class="h3 mb-2">Company discovery — bulk dataset import</h1>
 <p class="small text-secondary">
-  Import a dataset (e.g. an ABR/NZBN extract) as CSV. The raw file is preserved
+  Import a structured dataset (e.g. an ABR/NZBN extract) as CSV, JSON, or JSONL. The raw file is preserved
   as immutable evidence; every row becomes observations with row-level provenance; rows
   become organisations through identifier-first matching, and possible duplicates go to
   the <a href="/resolution">resolution queue</a> — nothing merges silently.
@@ -48,11 +48,11 @@
 
   <div class="col-lg-5">
     <div class="card">
-      <div class="card-header">Import a dataset (CSV or single-CSV ZIP)</div>
+      <div class="card-header">Import a dataset (CSV, JSON/JSONL, or single-file ZIP)</div>
       <div class="card-body">
         <form method="post" action="/discovery/import" enctype="multipart/form-data" class="vstack gap-2">
           <input type="file" name="dataset_file" class="form-control form-control-sm"
-                 accept=".csv,.zip,text/csv,application/zip" required>
+                 accept=".csv,.json,.jsonl,.zip,text/csv,application/json,application/x-ndjson,application/zip" required>
           <input name="dataset_name" class="form-control form-control-sm" placeholder="Dataset name (e.g. ABR bulk extract QLD)" required>
           <div class="row g-2">
             <div class="col"><input name="publisher" class="form-control form-control-sm" placeholder="Publisher"></div>
@@ -80,7 +80,7 @@
             {% for pack_id in pack_ids %}<option value="{{ pack_id }}">{{ pack_id }}</option>{% endfor %}
           </select>
           <hr class="my-1">
-          <div class="small text-secondary">Column mapping (CSV header names)</div>
+          <div class="small text-secondary">Field mapping (CSV headers or JSON property names)</div>
           {% for field_name, label, required in column_fields %}
           <input name="col_{{ field_name }}" class="form-control form-control-sm"
                  placeholder="{{ label }}{{ ' *' if required }}" {{ 'required' if required }}>

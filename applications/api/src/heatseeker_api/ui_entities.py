@@ -27,6 +27,7 @@ from heatseeker_intelligence.observations import record_observation
 from heatseeker_knowledge_graph import graph as knowledge_graph
 from heatseeker_knowledge_graph.models import RELATIONSHIP_TYPES
 from heatseeker_knowledge_graph.projects import participations_for_organisation
+from heatseeker_lead_intelligence.service import leads_for_organisation
 from heatseeker_source_registry.models import SourceDocument
 from sqlalchemy import select
 
@@ -174,6 +175,7 @@ def entity_detail(request: Request, organisation_id: str):
             edge_orgs=edge_orgs,
             neighbours=neighbours,
             participations=participations_for_organisation(session, group_ids),
+            leads=leads_for_organisation(session, profile["canonical"].id),
             relationship_types=RELATIONSHIP_TYPES,
             other_organisations=[
                 o

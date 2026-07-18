@@ -11,6 +11,7 @@ from heatseeker_common.models import Job
 from heatseeker_entity_resolution.models import EntityMatchCandidate, Organisation
 from heatseeker_intelligence.models import FactAssertion, ResearchQuestion
 from heatseeker_knowledge_graph.models import Project, Relationship
+from heatseeker_lead_intelligence.models import AccountOpportunity, Offering
 from heatseeker_source_registry.models import SourceDefinition, SourceDocument
 from heatseeker_source_registry.scopes import active_scope
 from sqlalchemy import func, select
@@ -67,6 +68,15 @@ def next_steps(session: Session) -> list[Step]:
         session,
         select(func.count(Relationship.id)).where(Relationship.status == "active"),
     ) + _count(session, select(func.count(Project.id)))
+    offerings = _count(
+        session, select(func.count(Offering.id)).where(Offering.status == "active")
+    )
+    scored_leads = _count(
+        session,
+        select(func.count(AccountOpportunity.id)).where(
+            AccountOpportunity.opportunity_stage != "suppressed"
+        ),
+    )
 
     steps = [
         Step(
@@ -178,6 +188,24 @@ def next_steps(session: Session) -> list[Step]:
             count=questions,
         ),
     ]
+    steps.append(
+        Step(
+            key="leads",
+            title="Define an offering & build the lead queue",
+            detail=(
+                f"{scored_leads} lead{'s' if scored_leads != 1 else ''} scored across "
+                f"{offerings} offering{'s' if offerings != 1 else ''} — ranked, "
+                "explained, exportable to XLSX."
+                if offerings
+                else "Tell Heatseeker what you sell; it ranks every known company "
+                "against it with evidence-cited reasons."
+            ),
+            href="/leads",
+            action_label="Open leads",
+            state="done" if offerings or not organisations else "todo",
+            count=scored_leads,
+        )
+    )
     if failed_jobs:
         steps.append(
             Step(
