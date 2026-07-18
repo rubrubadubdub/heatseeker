@@ -8,6 +8,9 @@
   {% if project.project_type_ids %} · types: {{ project.project_type_ids | join(', ') }}{% endif %}
   {% if project.sector_ids %} · sectors: {{ project.sector_ids | join(', ') }}{% endif %}
   {% if project.estimated_value %} · est. value {{ project.estimated_value }} {{ project.currency or '' }}{% endif %}
+  {% if project.expected_start_date %} · expected {{ project.expected_start_date.strftime('%Y-%m-%d') }}{% endif %}
+  {% if project.expected_end_date %} to {{ project.expected_end_date.strftime('%Y-%m-%d') }}{% endif %}
+  · {{ project.evidence_ids | length }} project evidence ref(s)
 </p>
 {% if project.description %}<p class="small">{{ project.description }}</p>{% endif %}
 
@@ -69,6 +72,8 @@
             <span class="input-group-text">confidence</span>
             <input name="confidence" type="number" step="0.05" min="0" max="1" value="0.5" class="form-control">
           </div>
+          <input name="contract_value" type="number" min="0" step="0.01"
+                 class="form-control form-control-sm" placeholder="Contract value (optional)">
           <input name="evidence_ids" class="form-control form-control-sm"
                  placeholder="Evidence UUID(s), comma-separated">
           <button class="btn btn-sm btn-primary">Add participant</button>

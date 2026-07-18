@@ -33,7 +33,7 @@ policy-cleared auto-crawl (ADR-0014, migration 0013). Provider credentials stay 
 migrations 0015–0016): the
 mandatory evidence chain (Observation→FactAssertion) with field-level inspectable
 confidence (§17), multi-axis classifications, capability status ladder, size bands
-(honest `unresolved`), research gaps, immutable-scope CSV/ZIP bulk import with conservative
+(honest `unresolved`), research gaps, immutable-scope CSV/JSON/JSONL/ZIP bulk import with conservative
 identity/authority handling (`/discovery`), and the merge-safe profile workspace on
 `/entities/{id}`. **M6 projects, relationships & graph is done**
 (`heatseeker_knowledge_graph`, migration 0017): projects + typed participation,
@@ -48,7 +48,7 @@ of fabricated values), §20.2 contactability, reversible suppression respected i
 and exports, `/leads` queue UI + full-detail XLSX export; lead timing is a declared
 neutral stub until M7. A **guided operating layer** wraps it all: dashboard "Next
 steps" checklist + one-click `pipeline.advance` job, and orientation intros on dense
-pages — keep new features wired into `guidance.py`. 279 tests green. M7 (news, events,
+pages — keep new features wired into `guidance.py`. 285 tests green. M7 (news, events,
 macro signals) next — replaces the lead timing stub.
 Check [docs/roadmap.md](docs/roadmap.md) for milestone status before starting any work.
 Dev loop: `uv sync` · `uv run pytest -q` · `uv run ruff check .` · `uv run heatseeker run`

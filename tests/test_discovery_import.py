@@ -595,3 +595,75 @@ def test_worker_failure_status_survives_reraise(engine, settings):
         assert failed.status == ImportRunStatus.FAILED
         assert "stored dataset document" in failed.error
         assert failed.finished_at is not None
+
+
+CONTACT_CSV = (
+    b"Name,ABN,State,Town,Postcode,Email,Phone,Street\n"
+    b"Acme Scaffolding Pty Ltd,51 824 753 556,QLD,Brisbane,4000,"
+    b"info@acme.com.au,+61 7 3333 1111,12 Gantry Rd\n"
+    b"Brisbane Formwork,98 765 432 109,QLD,South Brisbane,4101,"
+    b"estimating@bfw.com.au,not-a-phone,\n"
+    b"Bad Email Co,12 345 678 901,QLD,Brisbane,4000,not-an-email,,\n"
+)
+
+CONTACT_MAPPING = discovery.MappingSpec(
+    columns={
+        "name": "Name",
+        "identifier": "ABN",
+        "region": "State",
+        "locality": "Town",
+        "postcode": "Postcode",
+        "email": "Email",
+        "phone": "Phone",
+        "street_address": "Street",
+    },
+    constants={"identifier_scheme": "abn", "country": "AU"},
+)
+
+
+def test_contact_columns_become_typed_contact_points(engine, settings):
+    with session_scope(engine) as session:
+        _run_import(session, settings, content=CONTACT_CSV, mapping=CONTACT_MAPPING)
+
+    with session_scope(engine) as session:
+        rows = {o.canonical_name: o for o in entities.list_organisations(session)}
+        acme = rows["Acme Scaffolding Pty Ltd"]
+        routes = {(c.contact_type, c.value) for c in acme.contact_points}
+        assert ("general_email", "info@acme.com.au") in routes
+        assert ("phone", "+61 7 3333 1111") in routes
+        # Contact points carry observation evidence references.
+        assert all(c.source_evidence_ids for c in acme.contact_points)
+        # Street address lands on the mailing address (spec 18.5 / export needs it).
+        assert acme.primary_location.address_lines == ["12 Gantry Rd"]
+
+        # Role-prefix emails are typed as role routes (20.2 priority).
+        formwork = rows["Brisbane Formwork"]
+        role_routes = [c for c in formwork.contact_points if c.contact_type == "role_email"]
+        assert [c.value for c in role_routes] == ["estimating@bfw.com.au"]
+        # Invalid phone recorded as rejected observation, never a contact point.
+        assert not any(c.contact_type == "phone" for c in formwork.contact_points)
+
+        bad = rows["Bad Email Co"]
+        assert bad.contact_points == []
+        rejected = session.execute(
+            select(Observation).where(
+                Observation.subject_entity_id == bad.id,
+                Observation.predicate == "email",
+            )
+        ).scalar_one()
+        assert rejected.normalisation_status == NormalisationStatus.REJECTED
+
+    # Re-import (new bytes, same companies): contacts dedupe instead of duplicating.
+    refreshed = CONTACT_CSV + b"Extra Co,22 222 222 222,QLD,Brisbane,4000,,,\n"
+    with session_scope(engine) as session:
+        _run_import(
+            session, settings, content=refreshed, mapping=CONTACT_MAPPING, name="refresh"
+        )
+    with session_scope(engine) as session:
+        acme = next(
+            o for o in entities.list_organisations(session)
+            if o.canonical_name == "Acme Scaffolding Pty Ltd"
+        )
+        emails = [c for c in acme.contact_points if c.contact_type == "general_email"]
+        assert len(emails) == 1
+        assert len(emails[0].source_evidence_ids) == 2  # evidence accumulated

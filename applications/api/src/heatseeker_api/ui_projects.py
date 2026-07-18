@@ -1,5 +1,6 @@
 """GUI routes for projects and the knowledge graph (M6)."""
 
+from datetime import UTC, date, datetime, time
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Query, Request
@@ -31,6 +32,10 @@ def _split_ids(raw: str) -> list[str]:
     return [part.strip().lower() for part in raw.replace(";", ",").split(",") if part.strip()]
 
 
+def _start_of_day(value: date | None) -> datetime | None:
+    return datetime.combine(value, time.min, tzinfo=UTC) if value else None
+
+
 @router.get("/projects", response_class=HTMLResponse)
 def projects_page(request: Request, q: Annotated[str | None, Query(max_length=200)] = None):
     with session_scope(request.app.state.engine) as session:
@@ -52,7 +57,12 @@ def create_project_action(
     status: Annotated[str, Form()] = "unknown",
     project_types: Annotated[str, Form()] = "",
     sectors: Annotated[str, Form()] = "",
+    estimated_value: Annotated[float | None, Form()] = None,
+    currency: Annotated[str, Form()] = "",
+    expected_start_date: Annotated[date | None, Form()] = None,
+    expected_end_date: Annotated[date | None, Form()] = None,
     description: Annotated[str, Form()] = "",
+    evidence_ids: Annotated[str, Form()] = "",
 ):
     if status not in [s.value for s in ProjectStatus]:
         return _redirect("/projects", "Invalid project status", "danger")
@@ -64,7 +74,12 @@ def create_project_action(
                 status=status,
                 project_type_ids=_split_ids(project_types),
                 sector_ids=_split_ids(sectors),
+                estimated_value=estimated_value,
+                currency=currency,
+                expected_start_date=_start_of_day(expected_start_date),
+                expected_end_date=_start_of_day(expected_end_date),
                 description=description,
+                evidence_ids=_split_ids(evidence_ids),
             )
             project_id = project.id
     except ValueError as exc:
@@ -99,6 +114,7 @@ def add_participant_action(
     role_type: Annotated[str, Form()],
     status: Annotated[str, Form()] = "unconfirmed",
     confidence: Annotated[float, Form()] = 0.5,
+    contract_value: Annotated[float | None, Form()] = None,
     evidence_ids: Annotated[str, Form()] = "",
 ):
     try:
@@ -109,7 +125,8 @@ def add_participant_action(
                 organisation_id,
                 role_type,
                 status=status,
-                confidence=max(0.0, min(1.0, confidence)),
+                confidence=confidence,
+                contract_value=contract_value,
                 evidence_ids=_split_ids(evidence_ids),
             )
     except (ValueError, LookupError) as exc:
@@ -158,7 +175,7 @@ def create_relationship_action(
                 subject_entity_id,
                 object_entity_id,
                 relationship_type,
-                confidence=max(0.0, min(1.0, confidence)),
+                confidence=confidence,
                 evidence_ids=_split_ids(evidence_ids),
                 created_by="user",
             )

@@ -26,8 +26,16 @@ def test_project_workspace_roundtrip(engine, settings):
 
     created = client.post(
         "/api/projects",
-        json={"name": "Hospital North Tower", "status": "active",
-              "project_type_ids": ["major_project"]},
+        json={
+            "name": "Hospital North Tower",
+            "status": "active",
+            "project_type_ids": ["major_project"],
+            "estimated_value": 12_000_000,
+            "currency": "AUD",
+            "expected_start_date": "2026-08-01T00:00:00Z",
+            "expected_end_date": "2027-09-30T00:00:00Z",
+            "evidence_ids": [doc_a],
+        },
     )
     assert created.status_code == 201
     project_id = created.json()["id"]
@@ -50,6 +58,10 @@ def test_project_workspace_roundtrip(engine, settings):
     assert bare.status_code == 422
 
     detail = client.get(f"/api/projects/{project_id}").json()
+    assert detail["estimated_value"] == 12_000_000
+    assert detail["currency"] == "AUD"
+    assert detail["expected_start_date"].startswith("2026-08-01")
+    assert detail["evidence_count"] == 1
     assert {p["role_type"] for p in detail["participants"]} == {
         "scaffold_contractor", "principal_contractor",
     }

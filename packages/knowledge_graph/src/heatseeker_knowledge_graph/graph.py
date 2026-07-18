@@ -83,6 +83,8 @@ def add_relationship(
         raise LookupError(f"organisation not found: {subject_id}")
     if session.get(Organisation, object_id) is None:
         raise LookupError(f"organisation not found: {object_id}")
+    if valid_from is not None and valid_from.tzinfo is None:
+        raise GraphError("valid_from must include a timezone")
     evidence = validate_evidence_ids(session, evidence_ids)
 
     open_edge = session.execute(
@@ -147,6 +149,8 @@ def _close(
     if edge.status != RelationshipStatus.ACTIVE:
         raise GraphError(f"relationship is already {edge.status} — history is immutable")
     valid_to = when or utc_now()
+    if valid_to.tzinfo is None:
+        raise GraphError("valid_to must include a timezone")
     if edge.valid_from is not None and valid_to < edge.valid_from:
         raise GraphError("valid_to must not precede valid_from")
     edge.status = status

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from heatseeker_common import audit
 from heatseeker_common.timeutil import utc_now
-from heatseeker_entity_resolution.models import Organisation
+from heatseeker_entity_resolution.models import Location, Organisation
 from heatseeker_entity_resolution.resolution import canonical_id
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -46,6 +46,16 @@ def create_project(
         raise ValueError("estimated_value must not be negative")
     if estimated_value is not None and not (currency or "").strip():
         raise ValueError("currency is required when estimated_value is supplied")
+    if location_id is not None and session.get(Location, location_id) is None:
+        raise LookupError(f"location not found: {location_id}")
+    for label, value in (
+        ("start_date", start_date),
+        ("end_date", end_date),
+        ("expected_start_date", expected_start_date),
+        ("expected_end_date", expected_end_date),
+    ):
+        if value is not None and value.tzinfo is None:
+            raise ValueError(f"project {label} must include a timezone")
     if start_date and end_date and end_date < start_date:
         raise ValueError("project end_date must not precede start_date")
     if expected_start_date and expected_end_date and expected_end_date < expected_start_date:

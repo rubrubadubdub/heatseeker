@@ -36,6 +36,21 @@ queries possible.
 7. **Guidance integration**: the dashboard checklist gains a "map projects &
    relationships" step once a population exists (per the hand-holding preference).
 
+## Qualification hardening (2026-07-18)
+
+- Project, participation, and relationship writes validate status vocabularies, entity
+  existence, value/date ranges, confidence bounds, and evidence references. Confidence
+  above 0.5 and probable/confirmed participation require evidence that resolves to a
+  stored source document or observation.
+- Unconfirmed participation remains visible on the project workspace but is excluded
+  from graph traversal. Historical/retracted records cannot be reopened or silently
+  downgraded.
+- Project co-participation edges are loaded in bounded set queries and aggregated by
+  canonical peer/project, eliminating per-participation query fan-out and duplicate
+  derived edges.
+- Every create, strengthen, status change, end, and retract operation records an audit
+  event; API and UI validation errors are surfaced rather than persisted.
+
 ## Schema (migration 0017)
 
 - `project` — name, project_type_ids JSON (pack vocab), status

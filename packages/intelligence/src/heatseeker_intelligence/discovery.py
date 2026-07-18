@@ -28,12 +28,17 @@ from heatseeker_core_domain.geography import (
 )
 from heatseeker_entity_resolution import entities
 from heatseeker_entity_resolution.models import (
+    ContactType,
     EntityProvenance,
     LocationType,
     Organisation,
     OrganisationIdentifier,
 )
-from heatseeker_entity_resolution.normalise import normalise_identifier, normalise_name
+from heatseeker_entity_resolution.normalise import (
+    normalise_identifier,
+    normalise_name,
+    phone_match_key,
+)
 from heatseeker_entity_resolution.resolution import canonical_id
 from heatseeker_industry_packs.loader import default_packs_root, discover_packs, load_pack
 from heatseeker_source_registry.models import (
@@ -58,10 +63,12 @@ from heatseeker_intelligence.observations import (
     PREDICATE_ARCHETYPE_CLAIM,
     PREDICATE_CANONICAL_NAME,
     PREDICATE_DOMAIN,
+    PREDICATE_EMAIL,
     PREDICATE_EMPLOYEES,
     PREDICATE_IDENTIFIER,
     PREDICATE_LEGAL_NAME,
     PREDICATE_LOCATION,
+    PREDICATE_PHONE,
     PREDICATE_REGISTRATION_STATUS,
     PREDICATE_SERVICE_CLAIM,
     record_observation,
@@ -84,10 +91,27 @@ MAPPABLE_FIELDS = (
     "postcode",
     "country",
     "employees_band",
+    "email",
+    "phone",
+    "street_address",
     "service_claim",
     "archetype_claim",
     "pack_id",
 )
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Local parts that mark a role-based route (§20.2 prefers these over general boxes).
+_ROLE_LOCAL_PARTS = {
+    "estimating",
+    "tenders",
+    "design",
+    "drafting",
+    "engineering",
+    "projects",
+    "operations",
+    "commercial",
+    "procurement",
+}
 
 _REGION_ALIASES = {
     ("AU", "AUSTRALIAN CAPITAL TERRITORY"): "ACT",
@@ -659,10 +683,12 @@ def _import_row(
                 confidence=0.0,
                 normalisation_status=NormalisationStatus.REJECTED,
             )
-    if locality or mapping.value(row, "postcode") or country:
+    street_address = mapping.value(row, "street_address")
+    if locality or mapping.value(row, "postcode") or country or street_address:
         observe(
             PREDICATE_LOCATION,
             {
+                "street": street_address,
                 "locality": locality,
                 "region": mapping.value(row, "region"),
                 "postcode": mapping.value(row, "postcode"),
@@ -673,6 +699,7 @@ def _import_row(
         if organisation.primary_location_id is None and locality:
             location = entities.add_location(
                 session,
+                address_lines=[street_address] if street_address else [],
                 locality=locality,
                 region=mapping.value(row, "region"),
                 postal_code=mapping.value(row, "postcode"),
@@ -680,6 +707,54 @@ def _import_row(
                 location_type=LocationType.REGISTERED_ADDRESS,
             )
             entities.set_primary_location(session, organisation, location)
+        elif street_address and organisation.primary_location is not None and not (
+            organisation.primary_location.address_lines or []
+        ):
+            organisation.primary_location.address_lines = [street_address]
+
+    email = mapping.value(row, "email")
+    if email:
+        email = email.strip().lower()
+        if _EMAIL_RE.fullmatch(email):
+            observation = observe(PREDICATE_EMAIL, email, confidence=0.85)
+            local_part = email.split("@", 1)[0]
+            entities.add_contact_point(
+                session,
+                organisation,
+                ContactType.ROLE_EMAIL
+                if local_part in _ROLE_LOCAL_PARTS
+                else ContactType.GENERAL_EMAIL,
+                email,
+                role_based=local_part in _ROLE_LOCAL_PARTS,
+                confidence=0.7,
+                source_evidence_ids=[observation.id],
+            )
+        else:
+            observe(
+                PREDICATE_EMAIL,
+                email,
+                confidence=0.0,
+                normalisation_status=NormalisationStatus.REJECTED,
+            )
+    phone = mapping.value(row, "phone")
+    if phone:
+        if phone_match_key(phone) is not None:
+            observation = observe(PREDICATE_PHONE, phone, confidence=0.85)
+            entities.add_contact_point(
+                session,
+                organisation,
+                ContactType.PHONE,
+                phone,
+                confidence=0.7,
+                source_evidence_ids=[observation.id],
+            )
+        else:
+            observe(
+                PREDICATE_PHONE,
+                phone,
+                confidence=0.0,
+                normalisation_status=NormalisationStatus.REJECTED,
+            )
     employees = mapping.value(row, "employees_band")
     if employees:
         valid_employee_band = employees in sizing.EMPLOYEE_BANDS

@@ -44,6 +44,17 @@
                  placeholder="Project type ids (comma-separated, pack vocab)">
           <input name="sectors" class="form-control form-control-sm"
                  placeholder="Sector ids (comma-separated)">
+          <div class="input-group input-group-sm">
+            <input name="estimated_value" type="number" min="0" step="0.01"
+                   class="form-control" placeholder="Estimated value">
+            <input name="currency" class="form-control" maxlength="10" placeholder="Currency">
+          </div>
+          <div class="row g-2">
+            <div class="col"><label class="form-label small mb-0">Expected start</label><input name="expected_start_date" type="date" class="form-control form-control-sm"></div>
+            <div class="col"><label class="form-label small mb-0">Expected end</label><input name="expected_end_date" type="date" class="form-control form-control-sm"></div>
+          </div>
+          <input name="evidence_ids" class="form-control form-control-sm"
+                 placeholder="Evidence UUID(s), comma-separated">
           <textarea name="description" class="form-control form-control-sm" rows="2"
                     placeholder="Description (optional)"></textarea>
           <button class="btn btn-sm btn-primary">Create project</button>

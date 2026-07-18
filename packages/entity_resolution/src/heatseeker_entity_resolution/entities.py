@@ -160,6 +160,18 @@ def add_contact_point(
             raise ValueError(
                 "contact point and operational unit must belong to the same organisation"
             )
+    # Same route re-observed: refresh and accumulate evidence instead of duplicating.
+    for existing in organisation.contact_points:
+        if (
+            existing.contact_type == contact_type
+            and existing.value.casefold() == value.casefold()
+        ):
+            existing.last_verified_at = utc_now()
+            existing.confidence = max(existing.confidence, confidence)
+            merged = set(existing.source_evidence_ids) | set(source_evidence_ids or [])
+            existing.source_evidence_ids = sorted(merged)
+            session.flush()
+            return existing
     contact = ContactPoint(
         operational_unit_id=operational_unit_id,
         contact_type=contact_type,

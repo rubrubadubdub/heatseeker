@@ -1,5 +1,6 @@
 """JSON API for projects and the knowledge graph (M6), under /api/*."""
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -34,7 +35,16 @@ class ProjectCreateRequest(BaseModel):
     status: str = "unknown"
     project_type_ids: list[str] = Field(default_factory=list)
     sector_ids: list[str] = Field(default_factory=list)
+    location_id: str | None = None
+    geography_scope: dict | None = None
+    estimated_value: float | None = Field(default=None, ge=0.0)
+    currency: str | None = Field(default=None, max_length=10)
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    expected_start_date: datetime | None = None
+    expected_end_date: datetime | None = None
     description: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
 
 
 class ParticipationRequest(BaseModel):
@@ -44,6 +54,7 @@ class ParticipationRequest(BaseModel):
     role_type: str = Field(min_length=1, max_length=50)
     status: str = "unconfirmed"
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    contract_value: float | None = Field(default=None, ge=0.0)
     evidence_ids: list[str] = Field(default_factory=list)
 
 
@@ -84,9 +95,25 @@ def api_create_project(request: Request, payload: ProjectCreateRequest):
                 status=payload.status,
                 project_type_ids=payload.project_type_ids,
                 sector_ids=payload.sector_ids,
+                location_id=payload.location_id,
+                geography_scope=payload.geography_scope,
+                estimated_value=payload.estimated_value,
+                currency=payload.currency,
+                start_date=payload.start_date,
+                end_date=payload.end_date,
+                expected_start_date=payload.expected_start_date,
+                expected_end_date=payload.expected_end_date,
                 description=payload.description,
+                evidence_ids=payload.evidence_ids,
             )
-            return {"id": project.id, "name": project.name, "status": project.status}
+            return {
+                "id": project.id,
+                "name": project.name,
+                "status": project.status,
+                "evidence_count": len(project.evidence_ids),
+            }
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -103,7 +130,16 @@ def api_project_detail(request: Request, project_id: str):
             "status": project.status,
             "project_type_ids": project.project_type_ids,
             "sector_ids": project.sector_ids,
+            "location_id": project.location_id,
+            "geography_scope": project.geography_scope,
+            "estimated_value": project.estimated_value,
+            "currency": project.currency,
+            "start_date": project.start_date,
+            "end_date": project.end_date,
+            "expected_start_date": project.expected_start_date,
+            "expected_end_date": project.expected_end_date,
             "description": project.description,
+            "evidence_count": len(project.evidence_ids),
             "participants": [
                 {
                     "organisation_id": p.organisation_id,
@@ -111,6 +147,7 @@ def api_project_detail(request: Request, project_id: str):
                     "role_type": p.role_type,
                     "status": p.status,
                     "confidence": p.confidence,
+                    "contract_value": p.contract_value,
                     "evidence_count": len(p.evidence_ids),
                 }
                 for p in project.participations
@@ -129,6 +166,7 @@ def api_add_participant(request: Request, project_id: str, payload: Participatio
                 payload.role_type,
                 status=payload.status,
                 confidence=payload.confidence,
+                contract_value=payload.contract_value,
                 evidence_ids=payload.evidence_ids,
             )
             return {

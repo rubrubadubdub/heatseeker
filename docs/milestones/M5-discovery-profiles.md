@@ -111,3 +111,20 @@ conservative/declared authority, full-name region normalisation, pack claim inge
 manual-entry versus verification, evidence links, ZIP ambiguity, and populated 0015 ↔
 0016 migration round trips. Reconciliation also proves that independently repeated weak
 directories cannot outvote a primary authority, while preserving the disagreement.
+
+## Qualification hardening (2026-07-18)
+
+- Structured discovery accepts bounded CSV, JSON, and JSONL exports (including one
+  supported file in a ZIP), removing a spreadsheet-conversion choke point while keeping
+  raw-document and row/line provenance.
+- Import matching uses an import-local identifier and exact name/place index instead of
+  scanning the whole organisation population per row. Ambiguous exact keys remain
+  deliberately unmatched for M4 review.
+- Immutable scope snapshots now enforce geography, industry, and include/exclude target
+  facets. Dataset `coverage_date` drives observation freshness instead of import time.
+- Bulk service/archetype claims are low-authority observations, never registered facts;
+  tier-5 and weak-source capability signals remain hypotheses until independently
+  corroborated. Invalid mapped values survive as rejected observations for inspection.
+- Corroboration collapses source-copy/ownership lineage, cached facts and capabilities
+  age without new evidence, and system-generated gap questions close when the underlying
+  evidence gap is filled.
