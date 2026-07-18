@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from heatseeker_common.models import Job
 from heatseeker_entity_resolution.models import EntityMatchCandidate, Organisation
 from heatseeker_intelligence.models import FactAssertion, ResearchQuestion
+from heatseeker_knowledge_graph.models import Project, Relationship
 from heatseeker_source_registry.models import SourceDefinition, SourceDocument
 from heatseeker_source_registry.scopes import active_scope
 from sqlalchemy import func, select
@@ -62,6 +63,10 @@ def next_steps(session: Session) -> list[Step]:
     failed_jobs = _count(
         session, select(func.count(Job.id)).where(Job.status == "failed")
     )
+    connections = _count(
+        session,
+        select(func.count(Relationship.id)).where(Relationship.status == "active"),
+    ) + _count(session, select(func.count(Project.id)))
 
     steps = [
         Step(
@@ -127,6 +132,23 @@ def next_steps(session: Session) -> list[Step]:
             action_label="Open resolution queue",
             state="attention" if queue_open else "done",
             count=queue_open,
+        ),
+        Step(
+            key="connections",
+            title="Map projects & relationships",
+            detail=(
+                f"{connections} project{'s' if connections != 1 else ''}/relationship"
+                "s recorded — shared projects and typed relationships make companies "
+                "explorable as a network."
+                if connections
+                else "No projects or relationships yet. Once you have companies, connect "
+                "them: add a project and its participants, or record a relationship on "
+                "a company profile."
+            ),
+            href="/projects",
+            action_label="Open projects",
+            state="done" if connections or not organisations else "todo",
+            count=connections,
         ),
         Step(
             key="conflicts",

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Projects · Heatseeker{% endblock %}
+{% block content %}
+<h1 class="h3 mb-2">Projects</h1>
+
+<div class="alert alert-info py-2 small mb-3">
+  <strong>What this page is:</strong> construction/works projects that connect companies.
+  Add a project, then attach the organisations involved with their roles — those shared
+  projects become graph connections you can explore from any company profile.
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <form method="get" action="/projects" class="mb-2 d-flex gap-2">
+      <input name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="Search project name">
+      <button class="btn btn-sm btn-outline-secondary">Search</button>
+    </form>
+    <table class="table table-sm align-middle">
+      <thead><tr><th>project</th><th>status</th><th>types</th><th>participants</th></tr></thead>
+      <tbody>
+      {% for project in projects %}
+        <tr>
+          <td><a href="/projects/{{ project.id }}">{{ project.name }}</a></td>
+          <td class="small">{{ project.status }}</td>
+          <td class="small">{{ project.project_type_ids | join(', ') or '—' }}</td>
+          <td class="small">{{ project.participations | length }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="small text-secondary">No projects yet — create one on the right.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">New project</div>
+      <div class="card-body">
+        <form method="post" action="/projects/create" class="vstack gap-2">
+          <input name="name" class="form-control form-control-sm" placeholder="Project name" required>
+          <select name="status" class="form-select form-select-sm">
+            {% for status in statuses %}<option value="{{ status }}">{{ status }}</option>{% endfor %}
+          </select>
+          <input name="project_types" class="form-control form-control-sm"
+                 placeholder="Project type ids (comma-separated, pack vocab)">
+          <input name="sectors" class="form-control form-control-sm"
+                 placeholder="Sector ids (comma-separated)">
+          <textarea name="description" class="form-control form-control-sm" rows="2"
+                    placeholder="Description (optional)"></textarea>
+          <button class="btn btn-sm btn-primary">Create project</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

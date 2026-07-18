@@ -17,10 +17,12 @@ from heatseeker_source_registry.regions import load_regions_if_available
 
 from heatseeker_api import (
     api_entities,
+    api_graph,
     api_routes,
     ui_ai,
     ui_discovery,
     ui_entities,
+    ui_projects,
     ui_routes,
     ui_sources,
 )
@@ -44,8 +46,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api_entities.router)
     app.include_router(ui_ai.router)
     app.include_router(ui_sources.router)
+    app.include_router(api_graph.router)
     app.include_router(ui_entities.router)
     app.include_router(ui_discovery.router)
+    app.include_router(ui_projects.router)
     app.include_router(ui_routes.router)
 
     @app.get("/health", include_in_schema=False)

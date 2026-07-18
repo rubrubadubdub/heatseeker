@@ -24,6 +24,9 @@ from heatseeker_intelligence import gaps
 from heatseeker_intelligence import profile as intelligence_profile
 from heatseeker_intelligence.models import ExtractionMethod
 from heatseeker_intelligence.observations import record_observation
+from heatseeker_knowledge_graph import graph as knowledge_graph
+from heatseeker_knowledge_graph.models import RELATIONSHIP_TYPES
+from heatseeker_knowledge_graph.projects import participations_for_organisation
 from heatseeker_source_registry.models import SourceDocument
 from sqlalchemy import select
 
@@ -147,6 +150,18 @@ def entity_detail(request: Request, organisation_id: str):
                 .order_by(EntityMerge.performed_at.desc())
             ).scalars()
         )
+        group_ids = [o.id for o in profile["group"]]
+        edges = knowledge_graph.edges_for(session, organisation_id, include_historical=True)
+        neighbours = knowledge_graph.neighbourhood(
+            session, organisation_id, depth=2, limit=15
+        )
+        edge_orgs = {
+            o.id: o
+            for o in (
+                session.get(type(organisation), edge.other_id) for edge in edges
+            )
+            if o is not None
+        }
         return _render(
             request,
             "entity_detail.html",
@@ -155,6 +170,16 @@ def entity_detail(request: Request, organisation_id: str):
             profile=profile,
             intel=intel,
             merges=merges,
+            edges=edges,
+            edge_orgs=edge_orgs,
+            neighbours=neighbours,
+            participations=participations_for_organisation(session, group_ids),
+            relationship_types=RELATIONSHIP_TYPES,
+            other_organisations=[
+                o
+                for o in entities.list_organisations(session, limit=200)
+                if o.id not in group_ids
+            ],
         )
 
 

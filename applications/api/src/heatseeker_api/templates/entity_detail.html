@@ -197,6 +197,68 @@
       </div>
     </div>
 
+    <h2 class="h6">Connections <span class="text-secondary fw-normal">(typed, dated, evidence-backed — nothing is ever deleted)</span></h2>
+    <table class="table table-sm align-middle mb-2">
+      <thead><tr><th>connection</th><th>with</th><th>confidence</th><th>period</th><th>evidence</th><th></th></tr></thead>
+      <tbody>
+      {% for edge in edges %}
+        <tr class="{{ 'text-secondary' if edge.detail.get('status') == 'historical' }}">
+          <td class="small">
+            {% if edge.kind == 'project' %}
+              <span class="badge text-bg-info">project</span> {{ edge.label }}
+              <span class="text-secondary">({{ edge.detail.my_role }} ↔ {{ edge.detail.their_role }})</span>
+            {% else %}
+              {{ '→' if edge.direction == 'out' else '←' }} {{ edge.label }}
+              {% if edge.detail.get('status') == 'historical' %}<span class="badge text-bg-secondary">historical</span>{% endif %}
+            {% endif %}
+          </td>
+          <td>{% if edge.other_id in edge_orgs %}<a href="/entities/{{ edge.other_id }}">{{ edge_orgs[edge.other_id].canonical_name }}</a>{% else %}{{ edge.other_id[:8] }}{% endif %}</td>
+          <td class="small">{{ '%.2f' % edge.confidence }}</td>
+          <td class="small">
+            {% if edge.valid_from %}{{ edge.valid_from.date() }}{% endif %}
+            {% if edge.valid_to %} → {{ edge.valid_to.date() }}{% endif %}
+          </td>
+          <td class="small">{{ edge.evidence_count }}</td>
+          <td>
+            {% if edge.kind == 'relationship' and edge.detail.get('status') == 'active' %}
+            <div class="d-flex gap-1">
+              <form method="post" action="/relationships/{{ edge.ref_id }}/end">
+                <input type="hidden" name="entity_id" value="{{ organisation.id }}">
+                <button class="btn btn-sm btn-outline-secondary py-0" title="Relationship ended — dates retained">End</button>
+              </form>
+              <form method="post" action="/relationships/{{ edge.ref_id }}/retract">
+                <input type="hidden" name="entity_id" value="{{ organisation.id }}">
+                <button class="btn btn-sm btn-outline-danger py-0" title="Edge was wrong — kept for audit">Retract</button>
+              </form>
+            </div>
+            {% elif edge.kind == 'project' %}
+            <a href="/projects/{{ edge.ref_id }}" class="btn btn-sm btn-outline-secondary py-0">Open project</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="small text-secondary">No connections yet — add a relationship on the right, or put this company on a <a href="/projects">project</a>.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    {% if neighbours %}
+    <div class="card mb-3">
+      <div class="card-header py-1 small">Network explorer — who this company reaches within 2 hops</div>
+      <div class="card-body py-2 small">
+        {% for neighbour in neighbours %}
+        <div class="mb-1">
+          <a href="/entities/{{ neighbour.organisation.id }}">{{ neighbour.organisation.canonical_name }}</a>
+          <span class="text-secondary">· {{ neighbour.hops }} hop{{ 's' if neighbour.hops != 1 }}
+            · path confidence {{ '%.2f' % neighbour.best_confidence }} ·
+            {% for hop in neighbour.via %}{{ hop.edge.label }}{{ ' → ' if not loop.last }}{% endfor %}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     <h2 class="h6">Operational units (never flattened into the legal entity)</h2>
     <table class="table table-sm">
       <thead><tr><th>type</th><th>name</th><th>status</th><th>origin record</th></tr></thead>
@@ -259,6 +321,47 @@
         </form>
       </div>
     </div>
+
+    {% if not organisation.merged_into_id %}
+    <div class="card mb-3">
+      <div class="card-header">Add relationship</div>
+      <div class="card-body">
+        <form method="post" action="/relationships/create" class="vstack gap-2">
+          <input type="hidden" name="subject_entity_id" value="{{ organisation.id }}">
+          <select name="relationship_type" class="form-select form-select-sm">
+            {% for type_name in relationship_types %}<option value="{{ type_name }}">{{ type_name }}</option>{% endfor %}
+          </select>
+          <select name="object_entity_id" class="form-select form-select-sm" required>
+            <option value="">With organisation…</option>
+            {% for other in other_organisations %}
+            <option value="{{ other.id }}">{{ other.canonical_name }}</option>
+            {% endfor %}
+          </select>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text">confidence</span>
+            <input name="confidence" type="number" step="0.05" min="0" max="1" value="0.5" class="form-control">
+          </div>
+          <button class="btn btn-sm btn-primary">Record relationship</button>
+          <div class="form-text">Reads “this company {{ '→' }} type {{ '→' }} other”. Parent/branch
+            structure belongs here too — merging is only for true duplicates.</div>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if participations %}
+    <div class="card mb-3">
+      <div class="card-header">Projects</div>
+      <div class="card-body small">
+        {% for participation in participations %}
+        <div class="mb-1">
+          <a href="/projects/{{ participation.project_id }}">{{ participation.project.name }}</a>
+          <span class="text-secondary">· {{ participation.role_type }} · {{ participation.status }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
 
     <div class="card mb-3">
       <div class="card-header">Research gaps</div>

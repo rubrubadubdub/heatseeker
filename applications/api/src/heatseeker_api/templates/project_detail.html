@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · Heatseeker{% endblock %}
+{% block content %}
+<nav class="small mb-2"><a href="/projects">← projects</a></nav>
+<h1 class="h3 mb-1">{{ project.name }}</h1>
+<p class="small text-secondary mb-3">
+  status {{ project.status }}
+  {% if project.project_type_ids %} · types: {{ project.project_type_ids | join(', ') }}{% endif %}
+  {% if project.sector_ids %} · sectors: {{ project.sector_ids | join(', ') }}{% endif %}
+  {% if project.estimated_value %} · est. value {{ project.estimated_value }} {{ project.currency or '' }}{% endif %}
+</p>
+{% if project.description %}<p class="small">{{ project.description }}</p>{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <h2 class="h6">Participants (typed, confidence-scored — spec §13.10)</h2>
+    <table class="table table-sm align-middle">
+      <thead><tr><th>organisation</th><th>role</th><th>status</th><th>confidence</th><th>evidence</th><th></th></tr></thead>
+      <tbody>
+      {% for participation in project.participations %}
+        <tr>
+          <td><a href="/entities/{{ participation.organisation_id }}">{{ participation.organisation.canonical_name }}</a></td>
+          <td class="small">{{ participation.role_type }}</td>
+          <td><span class="badge text-bg-{{ participation_badges.get(participation.status, 'secondary') }}">{{ participation.status }}</span></td>
+          <td class="small">{{ '%.2f' % participation.confidence }}</td>
+          <td class="small">{{ participation.evidence_ids | length }}</td>
+          <td>
+            <form method="post" action="/participations/{{ participation.id }}/status" class="d-flex gap-1">
+              <select name="status" class="form-select form-select-sm py-0" style="max-width: 9rem">
+                {% for status in participation_statuses %}
+                <option value="{{ status }}" {{ 'selected' if status == participation.status }}>{{ status }}</option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-sm btn-outline-secondary py-0">Set</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="small text-secondary">No participants yet — connect organisations on the right.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">Add participant</div>
+      <div class="card-body">
+        <form method="post" action="/projects/{{ project.id }}/participants" class="vstack gap-2">
+          <select name="organisation_id" class="form-select form-select-sm" required>
+            <option value="">Choose organisation…</option>
+            {% for organisation in organisations %}
+            <option value="{{ organisation.id }}">{{ organisation.canonical_name }}</option>
+            {% endfor %}
+          </select>
+          <select name="role_type" class="form-select form-select-sm">
+            {% for role in roles %}<option value="{{ role }}">{{ role }}</option>{% endfor %}
+          </select>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text">status</span>
+            <select name="status" class="form-select">
+              {% for status in participation_statuses if status not in ('historical', 'retracted') %}
+              <option value="{{ status }}">{{ status }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text">confidence</span>
+            <input name="confidence" type="number" step="0.05" min="0" max="1" value="0.5" class="form-control">
+          </div>
+          <button class="btn btn-sm btn-primary">Add participant</button>
+          <div class="form-text">Shared projects become explorable connections on each
+            company's profile.</div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
