@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from heatseeker_api.main import create_app
 from heatseeker_common.db import session_scope
 from heatseeker_intelligence import discovery
-from test_discovery_import import CSV, MAPPING
+from test_discovery_import import CSV, MAPPING, SOCIAL_CSV, SOCIAL_MAPPING
 
 
 def _import_dataset(engine, settings):
@@ -58,6 +58,8 @@ def test_ui_discovery_page_and_import_form(engine, settings):
     page = client.get("/discovery")
     assert page.status_code == 200
     assert "bulk dataset import" in page.text.lower()
+    assert "Instagram profile column" in page.text
+    assert "profiles remain weak evidence" in page.text
 
     response = client.post(
         "/discovery/import",
@@ -88,6 +90,40 @@ def test_ui_discovery_page_and_import_form(engine, settings):
 
     listed = client.get("/discovery")
     assert "ABR extract" in listed.text
+
+
+def test_public_profile_contacts_expose_direct_evidence(engine, settings):
+    with session_scope(engine) as session:
+        run = discovery.create_import_run(
+            session,
+            settings,
+            SOCIAL_CSV,
+            dataset_name="public profiles",
+            mapping=SOCIAL_MAPPING,
+            publisher="public web research",
+            authority_tier=6,
+            enqueue=False,
+        )
+        discovery.execute_import(session, settings, run.id, SOCIAL_CSV)
+
+    client = TestClient(create_app(settings))
+    organisations = client.get("/api/entities").json()["organisations"]
+    acme = next(o for o in organisations if o["canonical_name"] == "Acme Scaffolding")
+    profile = client.get(f"/api/companies/{acme['id']}/profile").json()
+    instagram = next(
+        contact
+        for contact in profile["contact_points"]
+        if contact["contact_type"] == "social_profile"
+        and contact["label"] == "instagram"
+    )
+    assert instagram["value"] == "https://instagram.com/acme.scaffold"
+    assert instagram["confidence"] == 0.45
+    assert len(instagram["source_evidence_ids"]) == 1
+    assert len(instagram["evidence_document_ids"]) == 1
+
+    page = client.get(f"/entities/{acme['id']}")
+    assert "https://instagram.com/acme.scaffold" in page.text
+    assert f"/evidence/{instagram['evidence_document_ids'][0]}" in page.text
 
 
 def test_ui_entity_profile_sections_and_gap_actions(engine, settings):

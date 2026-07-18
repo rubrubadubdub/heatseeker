@@ -66,6 +66,33 @@ proposed → candidate → (policy check: robots + terms review §11.4)
 - Health tracking (success/failure, change frequency) can degrade or retire sources
   (spec §30.4).
 
+### Public profiles and cross-source company assembly
+
+Social networks and directories are discovery surfaces, not separate lead silos. An
+Instagram profile, Facebook business page, LinkedIn organisation page, YouTube channel,
+X/TikTok profile, directory listing, Maps result, official register row, and company
+website each remain an independent observation with their own source-document lineage.
+They can all point at the same candidate organisation.
+
+Public social URLs are normalised to stable account identities and stored as
+multi-valued, evidence-linked contact points. Exact shared profile URLs participate in
+the M4 match queue alongside stronger identifiers: registration ID, website domain,
+phone, exact address, and corroborated name/location. A social profile alone can only
+produce a review candidate; it never causes an exact or silent merge. Personal LinkedIn
+profiles, generic platform homepages, login/share routes, and content-only URLs without
+a stable account identity are rejected.
+
+When an already permitted company or association page links to a recognisable public
+profile, the crawler proposes that exact profile URL at authority tier 6 with a
+`discovered_via` relationship. It does not fetch the platform. Search query seeds may
+surface public profiles and directories, but their claims stay hypotheses until
+independently corroborated.
+
+No platform username/password vault is part of this workflow. If a future official API
+adapter is justified, app keys/tokens remain external secrets and any OAuth connection
+uses the platform's own authorization flow. Credentials never grant wider collection
+permission than the source policy and approved scope.
+
 ## 3. Expansion beyond the list — two mechanisms
 
 ### Transitive backlink discovery (owner requirement 2026-07-11, implemented at M3)
@@ -133,5 +160,6 @@ AI proposes *where else to look*, using pack vocabulary and accumulated evidence
 | Seed-list loader (pack → registry sync) | `packages/industry_packs` + `source_registry` | M2 |
 | Policy checker (robots fetch, terms status gate) | `packages/source_registry` | M2–M3 |
 | Deterministic expansion rules | `packages/crawler` (frontier), `source_registry` | M3–M5 |
+| Public-profile normalisation + cross-source matching | `packages/common`, entity resolution, intelligence import | M5 hardening |
 | `source.propose_expansion` AI task + Source Scout UI | `packages/ai` + API/worker (ADR-0014) | early M11 slice |
 | Review queue for proposed sources | research queues (spec §28.8) | M5 |

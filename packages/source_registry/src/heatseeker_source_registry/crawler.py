@@ -19,6 +19,7 @@ from xml.etree import ElementTree
 
 import httpx
 from heatseeker_common import audit
+from heatseeker_common.public_profiles import SocialProfile, try_social_profile_url
 from heatseeker_common.settings import Settings
 from heatseeker_common.timeutil import utc_now
 from protego import Protego
@@ -50,6 +51,7 @@ from heatseeker_source_registry.models import (
     SourceDocument,
     SourceDocumentReference,
     SourceLifecycle,
+    SourceRelationship,
 )
 from heatseeker_source_registry.policy import activation_blockers, policy_snapshot, robots_enforced
 from heatseeker_source_registry.publication import extract_claimed_published_at
@@ -296,18 +298,33 @@ def _record_and_enqueue_references(
                         )
                     ).first()
                     child_id = existing.document_id if existing else None
-        elif candidate.kind == "navigation" and _matches_vocabulary(
-            f"{candidate.anchor_text or ''} {candidate.url}", vocabulary
-        ):
-            _propose_external_source(
+        elif candidate.kind == "navigation" and (
+            profile := try_social_profile_url(candidate.url)
+        ) is not None:
+            proposed = _propose_external_source(
                 session,
                 source,
                 candidate.url,
                 candidate.anchor_text or "",
                 state,
                 budget,
+                discovered_on_url=parent.source_url,
+                social_profile=profile,
             )
-            decision = "source_proposed"
+            decision = "source_proposed" if proposed else "known_external"
+        elif candidate.kind == "navigation" and _matches_vocabulary(
+            f"{candidate.anchor_text or ''} {candidate.url}", vocabulary
+        ):
+            proposed = _propose_external_source(
+                session,
+                source,
+                candidate.url,
+                candidate.anchor_text or "",
+                state,
+                budget,
+                discovered_on_url=parent.source_url,
+            )
+            decision = "source_proposed" if proposed else "known_external"
 
         existing_reference = session.scalars(
             select(SourceDocumentReference).where(
@@ -357,25 +374,32 @@ def _propose_external_source(
     anchor_text: str,
     state: _RunState,
     budget: CrawlBudget,
-) -> None:
+    *,
+    discovered_on_url: str,
+    social_profile: SocialProfile | None = None,
+) -> bool:
     """Transitive discovery: an external, vocabulary-matched domain becomes a PROPOSED
     source with lineage — never crawled in this run (vetting funnel pass 1 input)."""
     if len(state.proposed_sources) >= budget.max_new_domains:
-        return
+        return False
     parts = urlsplit(url)
-    root = f"{parts.scheme}://{parts.netloc}/"
+    root = social_profile.url if social_profile is not None else f"{parts.scheme}://{parts.netloc}/"
     identity = url_identity(root)
     try:
         existing = resolve_identities(session, [identity])
     except SourceIdentityConflict:
-        return
+        return False
     if existing is not None:
-        return
+        return False
     proposed = SourceDefinition(
-        name=f"Discovered: {parts.netloc}",
+        name=(
+            f"Discovered {social_profile.platform} profile: {parts.path.strip('/')}"
+            if social_profile is not None
+            else f"Discovered: {parts.netloc}"
+        )[:300],
         source_category="weak_signal",
         base_url=root,
-        access_method="html",
+        access_method="manual" if social_profile is not None else "html",
         authority_tier=6,
         lifecycle_status=SourceLifecycle.PROPOSED,
         origin="proposal",
@@ -384,7 +408,7 @@ def _propose_external_source(
         geo_codes=origin_source.geo_codes,
         notes=(
             f"Auto-discovered via backlink from '{origin_source.name}' "
-            f"(anchor: {anchor_text[:120]!r}, page: {url[:200]})"
+            f"(anchor: {anchor_text[:120]!r}, page: {discovered_on_url[:200]})"
         ),
     )
     session.add(proposed)
@@ -393,16 +417,35 @@ def _propose_external_source(
         attach_identity(session, proposed, identity, origin="crawler", is_primary=True)
     except SourceIdentityConflict:
         session.expunge(proposed)
-        return
+        return False
+    session.add(
+        SourceRelationship(
+            source_definition_id=proposed.id,
+            related_source_definition_id=origin_source.id,
+            relationship_type="discovered_via",
+            confidence=1.0,
+            origin="crawler",
+            notes=f"Discovered on {discovered_on_url[:500]}",
+        )
+    )
     audit.record(
         session,
         "crawler",
         "source.proposed",
         "source",
         proposed.id,
-        {"from_source": origin_source.name, "domain": parts.netloc, "anchor": anchor_text[:200]},
+        {
+            "from_source": origin_source.name,
+            "domain": parts.netloc,
+            "profile_url": social_profile.url if social_profile is not None else None,
+            "discovered_on_url": discovered_on_url[:500],
+            "anchor": anchor_text[:200],
+        },
     )
-    state.proposed_sources.append(parts.netloc)
+    state.proposed_sources.append(
+        social_profile.url if social_profile is not None else parts.netloc
+    )
+    return True
 
 
 def _store_page(

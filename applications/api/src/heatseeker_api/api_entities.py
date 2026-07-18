@@ -292,6 +292,24 @@ def api_company_profile(request: Request, organisation_id: str):
                 }
                 for fact in assembled["facts"]
             ],
+            "contact_points": [
+                {
+                    "origin_id": row["origin"].id,
+                    "contact_type": row["item"].contact_type,
+                    "label": row["item"].label,
+                    "value": row["item"].value,
+                    "confidence": row["item"].confidence,
+                    "public_business_contact": row["item"].public_business_contact,
+                    "source_evidence_ids": list(row["item"].source_evidence_ids),
+                    "evidence_document_ids": [
+                        document.id
+                        for document in assembled["contact_evidence"].get(
+                            row["item"].id, []
+                        )
+                    ],
+                }
+                for row in assembled["identity"]["contact_points"]
+            ],
             "classifications": [
                 {
                     "pack_id": a.pack_id,

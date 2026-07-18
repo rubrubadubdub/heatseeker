@@ -90,6 +90,50 @@ def test_shared_phone_boosts_fuzzy_name(engine):
         assert score > 0.5
 
 
+def test_shared_public_profile_connects_evidence_without_forcing_exact_merge(engine):
+    with session_scope(engine) as session:
+        org_a = entities.create_organisation(session, "Acme Scaffolding Pty Ltd")
+        org_b = entities.create_organisation(session, "ACME Scaffolding Limited")
+        entities.add_contact_point(
+            session,
+            org_a,
+            ContactType.SOCIAL_PROFILE,
+            "https://www.instagram.com/Acme.Scaffold/",
+        )
+        entities.add_contact_point(
+            session,
+            org_b,
+            ContactType.SOCIAL_PROFILE,
+            "https://instagram.com/acme.scaffold",
+        )
+
+        state, score, signals, _ = score_pair(build_features(org_a), build_features(org_b))
+
+        assert state == MatchState.HIGH_CONFIDENCE_PROBABLE
+        assert state != MatchState.EXACT
+        assert score >= 0.85
+        assert any(signal["signal"] == "shared_social_profile" for signal in signals)
+
+
+def test_shared_public_profile_alone_still_requires_review(engine):
+    with session_scope(engine) as session:
+        org_a = entities.create_organisation(session, "Acme Access")
+        org_b = entities.create_organisation(session, "Unrelated Trading Name")
+        for org in (org_a, org_b):
+            entities.add_contact_point(
+                session,
+                org,
+                ContactType.SOCIAL_PROFILE,
+                "https://facebook.com/acmeaccess",
+            )
+
+        state, score, signals, _ = score_pair(build_features(org_a), build_features(org_b))
+
+        assert state == MatchState.POSSIBLE_REVIEW
+        assert score == 0.75
+        assert any(signal["signal"] == "shared_social_profile" for signal in signals)
+
+
 def test_business_email_domain_and_exact_address_are_match_signals(engine):
     with session_scope(engine) as session:
         org_a = entities.create_organisation(session, "Alpha Access")

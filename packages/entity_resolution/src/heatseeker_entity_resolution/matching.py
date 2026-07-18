@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from itertools import combinations
 
+from heatseeker_common.public_profiles import try_social_profile_url
 from heatseeker_common.timeutil import utc_now
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -38,6 +39,7 @@ _W_PHONE = 0.15
 _W_LOCALITY = 0.05
 _W_EMAIL_DOMAIN = 0.55
 _W_ADDRESS = 0.65
+_W_SOCIAL_PROFILE = 0.75
 _CONFLICT_PENALTY = 0.3
 
 _FUZZY_RATIO_FLOOR = 0.75
@@ -62,6 +64,7 @@ class OrgFeatures:
     email_domain_keys: set[str] = field(default_factory=set)
     address_keys: set[str] = field(default_factory=set)
     locality_keys: set[str] = field(default_factory=set)
+    social_profile_keys: set[str] = field(default_factory=set)
 
 
 def build_features(organisation: Organisation) -> OrgFeatures:
@@ -91,6 +94,10 @@ def build_features(organisation: Organisation) -> OrgFeatures:
             domain = email_domain(contact.value)
             if domain:
                 features.email_domain_keys.add(domain)
+        elif contact.contact_type == ContactType.SOCIAL_PROFILE:
+            profile = try_social_profile_url(contact.value)
+            if profile is not None:
+                features.social_profile_keys.add(profile.url)
     location = organisation.primary_location
     if location is not None:
         if location.locality:
@@ -210,6 +217,15 @@ def score_pair(a: OrgFeatures, b: OrgFeatures) -> tuple[str, float, list[dict], 
                 "weight": _W_ADDRESS,
             }
         )
+    if a.social_profile_keys & b.social_profile_keys:
+        contributions.append(_W_SOCIAL_PROFILE)
+        signals.append(
+            {
+                "signal": "shared_social_profile",
+                "detail": sorted(a.social_profile_keys & b.social_profile_keys),
+                "weight": _W_SOCIAL_PROFILE,
+            }
+        )
     if a.locality_keys & b.locality_keys:
         contributions.append(_W_LOCALITY)
         signals.append(
@@ -246,6 +262,7 @@ def _blocking_keys(features: OrgFeatures) -> set[str]:
     keys.update(f"phone:{key}" for key in features.phone_keys)
     keys.update(f"email:{domain}" for domain in features.email_domain_keys)
     keys.update(f"address:{address}" for address in features.address_keys)
+    keys.update(f"social:{profile}" for profile in features.social_profile_keys)
     for name in {features.name_norm, *features.alt_name_norms}:
         if name:
             keys.add(f"name-exact:{name}")
@@ -282,7 +299,12 @@ def _priority_dimensions(
     signal_names = {signal["signal"] for signal in signals}
     if "shared_identifier" in signal_names:
         ease = 1.0
-    elif signal_names & {"shared_domain", "name_exact", "shared_address"}:
+    elif signal_names & {
+        "shared_domain",
+        "name_exact",
+        "shared_address",
+        "shared_social_profile",
+    }:
         ease = 0.8
     else:
         ease = max(0.1, score - (0.15 * conflicts))

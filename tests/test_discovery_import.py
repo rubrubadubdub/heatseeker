@@ -48,7 +48,15 @@ MAPPING = discovery.MappingSpec(
 )
 
 
-def _run_import(session, settings, content=CSV, mapping=MAPPING, name="ABR extract"):
+def _run_import(
+    session,
+    settings,
+    content=CSV,
+    mapping=MAPPING,
+    name="ABR extract",
+    publisher="Australian Business Register",
+    authority_tier=5,
+):
     run = discovery.create_import_run(
         session,
         settings,
@@ -56,8 +64,9 @@ def _run_import(session, settings, content=CSV, mapping=MAPPING, name="ABR extra
         dataset_name=name,
         mapping=mapping,
         filename="abr.csv",
-        publisher="Australian Business Register",
+        publisher=publisher,
         licence_note="test licence",
+        authority_tier=authority_tier,
         enqueue=False,
     )
     return discovery.execute_import(session, settings, run.id, content)
@@ -451,7 +460,7 @@ def test_import_uses_dataset_coverage_date_for_freshness(engine, settings):
         assertions = list(session.scalars(select(FactAssertion)).all())
         assert assertions
         assert all(row.status == FactStatus.STALE for row in assertions)
-        assert run.transformation_version == "import/0.3"
+        assert run.transformation_version == "import/0.4"
 
     with session_scope(engine) as session, pytest.raises(ValueError, match="coverage_date"):
         discovery.create_import_run(
@@ -667,3 +676,148 @@ def test_contact_columns_become_typed_contact_points(engine, settings):
         emails = [c for c in acme.contact_points if c.contact_type == "general_email"]
         assert len(emails) == 1
         assert len(emails[0].source_evidence_ids) == 2  # evidence accumulated
+
+
+SOCIAL_CSV = (
+    b"Name,Instagram,Facebook,LinkedIn,OtherProfiles\n"
+    b"Acme Scaffolding,Acme.Scaffold,https://facebook.com/AcmeScaffold,"
+    b"https://linkedin.com/company/acme-scaffold,"
+    b"https://youtube.com/@AcmeScaffold|https://instagram.com/acme.scaffold\n"
+    b"Personal Profile Mistake,,,https://linkedin.com/in/a-person,\n"
+)
+
+SOCIAL_MAPPING = discovery.MappingSpec(
+    columns={
+        "name": "Name",
+        "instagram": "Instagram",
+        "facebook": "Facebook",
+        "linkedin": "LinkedIn",
+        "social_profile": "OtherProfiles",
+    }
+)
+
+
+def test_public_profiles_become_multi_source_identity_evidence(engine, settings):
+    with session_scope(engine) as session:
+        _run_import(
+            session,
+            settings,
+            content=SOCIAL_CSV,
+            mapping=SOCIAL_MAPPING,
+            name="public profiles",
+        )
+
+    with session_scope(engine) as session:
+        rows = {o.canonical_name: o for o in entities.list_organisations(session)}
+        acme = rows["Acme Scaffolding"]
+        profiles = {
+            (contact.label, contact.value): contact
+            for contact in acme.contact_points
+            if contact.contact_type == "social_profile"
+        }
+        assert set(profiles) == {
+            ("instagram", "https://instagram.com/acme.scaffold"),
+            ("facebook", "https://facebook.com/acmescaffold"),
+            ("linkedin", "https://linkedin.com/company/acme-scaffold"),
+            ("youtube", "https://youtube.com/@acmescaffold"),
+        }
+        assert all(contact.source_evidence_ids for contact in profiles.values())
+
+        observations = session.scalars(
+            select(Observation).where(
+                Observation.subject_entity_id == acme.id,
+                Observation.predicate == "social_profile",
+            )
+        ).all()
+        assert len(observations) == 4  # duplicate Instagram forms collapse within the row
+
+        mistaken = rows["Personal Profile Mistake"]
+        assert mistaken.contact_points == []
+        rejected = session.scalars(
+            select(Observation).where(
+                Observation.subject_entity_id == mistaken.id,
+                Observation.predicate == "social_profile",
+            )
+        ).one()
+        assert rejected.normalisation_status == NormalisationStatus.REJECTED
+
+        # Profiles are multi-valued provenance observations, not contradictory scalar facts.
+        social_facts = session.scalars(
+            select(FactAssertion).where(FactAssertion.predicate == "social_profile")
+        ).all()
+        assert social_facts == []
+
+
+def test_social_directory_and_website_evidence_assemble_one_company(engine, settings):
+    mapping = discovery.MappingSpec(
+        columns={
+            "name": "Name",
+            "locality": "Town",
+            "phone": "Phone",
+            "instagram": "Instagram",
+            "domain": "Web",
+            "street_address": "Street",
+        },
+        constants={"country": "AU"},
+    )
+    datasets = [
+        (
+            b"Name,Town,Phone,Instagram,Web,Street\n"
+            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,Acme.Scaffold,,\n",
+            "Instagram discovery",
+            "Instagram public profile",
+            6,
+        ),
+        (
+            b"Name,Town,Phone,Instagram,Web,Street\n"
+            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,,acme.com.au,\n",
+            "Yellow Pages discovery",
+            "Yellow Pages Australia",
+            5,
+        ),
+        (
+            b"Name,Town,Phone,Instagram,Web,Street\n"
+            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,,acme.com.au,12 Gantry Rd\n",
+            "Company website discovery",
+            "Acme company website",
+            3,
+        ),
+    ]
+    with session_scope(engine) as session:
+        for content, name, publisher, authority in datasets:
+            _run_import(
+                session,
+                settings,
+                content=content,
+                mapping=mapping,
+                name=name,
+                publisher=publisher,
+                authority_tier=authority,
+            )
+
+    with session_scope(engine) as session:
+        organisations = entities.list_organisations(session)
+        assert [organisation.canonical_name for organisation in organisations] == [
+            "Acme Scaffolding"
+        ]
+        acme = organisations[0]
+        phone = next(
+            contact for contact in acme.contact_points if contact.contact_type == "phone"
+        )
+        assert len(phone.source_evidence_ids) == 3
+        assert any(
+            contact.contact_type == "social_profile"
+            and contact.value == "https://instagram.com/acme.scaffold"
+            for contact in acme.contact_points
+        )
+        assert [domain.domain for domain in acme.domains] == ["acme.com.au"]
+        assert acme.primary_location.address_lines == ["12 Gantry Rd"]
+
+        evidence_source_ids = set(
+            session.scalars(
+                select(SourceDocument.source_definition_id)
+                .join(Observation, Observation.source_document_id == SourceDocument.id)
+                .where(Observation.subject_entity_id == acme.id)
+            )
+        )
+        assert len(evidence_source_ids) == 3

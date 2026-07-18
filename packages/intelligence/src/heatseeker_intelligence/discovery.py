@@ -17,6 +17,7 @@ from datetime import UTC, date, datetime, time
 
 from heatseeker_common import audit, jobs
 from heatseeker_common.models import PriorityClass
+from heatseeker_common.public_profiles import normalise_social_profile_url
 from heatseeker_common.settings import Settings
 from heatseeker_common.timeutil import utc_now
 from heatseeker_core_domain.geography import (
@@ -71,10 +72,11 @@ from heatseeker_intelligence.observations import (
     PREDICATE_PHONE,
     PREDICATE_REGISTRATION_STATUS,
     PREDICATE_SERVICE_CLAIM,
+    PREDICATE_SOCIAL_PROFILE,
     record_observation,
 )
 
-TRANSFORMATION_VERSION = "import/0.3"
+TRANSFORMATION_VERSION = "import/0.4"
 _MAX_REJECTED_SAMPLES = 20
 
 # Mapping fields → observation predicates handled by the importer. "columns" maps a
@@ -94,6 +96,16 @@ MAPPABLE_FIELDS = (
     "email",
     "phone",
     "street_address",
+    "facebook",
+    "instagram",
+    "linkedin",
+    "youtube",
+    "tiktok",
+    "x_profile",
+    "threads",
+    "pinterest",
+    "reddit",
+    "social_profile",
     "service_claim",
     "archetype_claim",
     "pack_id",
@@ -111,6 +123,19 @@ _ROLE_LOCAL_PARTS = {
     "operations",
     "commercial",
     "procurement",
+}
+
+_SOCIAL_MAPPING_FIELDS = {
+    "facebook": "facebook",
+    "instagram": "instagram",
+    "linkedin": "linkedin",
+    "youtube": "youtube",
+    "tiktok": "tiktok",
+    "x_profile": "x",
+    "threads": "threads",
+    "pinterest": "pinterest",
+    "reddit": "reddit",
+    "social_profile": None,
 }
 
 _REGION_ALIASES = {
@@ -696,7 +721,7 @@ def _import_row(
             },
             confidence=0.85,
         )
-        if organisation.primary_location_id is None and locality:
+        if organisation.primary_location_id is None and (locality or street_address):
             location = entities.add_location(
                 session,
                 address_lines=[street_address] if street_address else [],
@@ -754,6 +779,38 @@ def _import_row(
                 phone,
                 confidence=0.0,
                 normalisation_status=NormalisationStatus.REJECTED,
+            )
+    seen_social_profiles: set[str] = set()
+    for field_name, expected_platform in _SOCIAL_MAPPING_FIELDS.items():
+        for raw_profile in _split_claims(mapping.value(row, field_name)):
+            try:
+                profile = normalise_social_profile_url(
+                    raw_profile, expected_platform=expected_platform
+                )
+            except ValueError:
+                observe(
+                    PREDICATE_SOCIAL_PROFILE,
+                    {"platform": expected_platform, "url": raw_profile},
+                    confidence=0.0,
+                    normalisation_status=NormalisationStatus.REJECTED,
+                )
+                continue
+            if profile.url in seen_social_profiles:
+                continue
+            seen_social_profiles.add(profile.url)
+            observation = observe(
+                PREDICATE_SOCIAL_PROFILE,
+                {"platform": profile.platform, "url": profile.url},
+                confidence=0.7,
+            )
+            entities.add_contact_point(
+                session,
+                organisation,
+                ContactType.SOCIAL_PROFILE,
+                profile.url,
+                label=profile.platform,
+                confidence=0.45,
+                source_evidence_ids=[observation.id],
             )
     employees = mapping.value(row, "employees_band")
     if employees:

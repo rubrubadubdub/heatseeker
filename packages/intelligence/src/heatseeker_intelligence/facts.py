@@ -19,7 +19,7 @@ from heatseeker_intelligence.observations import observations_for, value_key
 
 # Contested share of observations at which a fact is flagged conflicted (§17.6).
 CONFLICT_RATIO = 1 / 3
-NON_ASSERTION_PREDICATES = {"service_claim", "archetype_claim"}
+NON_ASSERTION_PREDICATES = {"service_claim", "archetype_claim", "social_profile"}
 DEPENDENT_SOURCE_RELATIONSHIPS = {
     "copied_from",
     "derived_from",

@@ -12,6 +12,7 @@ from heatseeker_source_registry.models import (
     SourceDocument,
     SourceDocumentReference,
     SourceLifecycle,
+    SourceRelationship,
     TermsStatus,
 )
 from sqlalchemy import select, text
@@ -192,6 +193,39 @@ def test_external_vocabulary_links_become_proposals_not_crawls(engine, settings)
         assert proposed.lifecycle_status == SourceLifecycle.PROPOSED
         assert proposed.authority_tier == 6
         assert "backlink from 'ScaffCo'" in proposed.notes
+
+
+def test_public_profile_links_become_exact_manual_proposals(engine, settings):
+    transport, requested = _site(
+        {
+            "/": (
+                '<a href="https://www.instagram.com/Acme.Scaffold/">Instagram</a>'
+                '<a href="https://www.instagram.com/p/CONTENT123/">a post</a>'
+                "<p>home</p>"
+            )
+        }
+    )
+    with session_scope(engine) as session:
+        source_id = _make_source(session, pack_id="scaffolding_anz")
+        summary = crawl_source(
+            session, settings, source_id, transport=transport, sleeper=lambda s: None
+        )
+        assert summary["proposed_sources"] == ["https://instagram.com/acme.scaffold"]
+
+    assert all("instagram.com" not in path for path in requested)
+    with session_scope(engine) as session:
+        proposed = session.scalars(
+            select(SourceDefinition).where(SourceDefinition.origin == "proposal")
+        ).one()
+        assert proposed.base_url == "https://instagram.com/acme.scaffold"
+        assert proposed.access_method == "manual"
+        assert proposed.lifecycle_status == SourceLifecycle.PROPOSED
+        assert proposed.authority_tier == 6
+
+        relationship = session.scalars(select(SourceRelationship)).one()
+        assert relationship.source_definition_id == proposed.id
+        assert relationship.related_source_definition_id == source_id
+        assert relationship.relationship_type == "discovered_via"
 
 
 def test_sitemap_seeds_frontier(engine, settings):

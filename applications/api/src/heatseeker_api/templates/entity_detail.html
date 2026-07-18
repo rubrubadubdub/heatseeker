@@ -128,8 +128,9 @@
           </td>
           {% set contact_predicate = 'phone' if row.item.contact_type == 'phone' else ('email' if 'email' in row.item.contact_type else '') %}
           {% set contact_fact = intel.fact_by_predicate.get(contact_predicate) if contact_predicate else none %}
-          <td class="small">{% if contact_fact %}{{ contact_fact.confidence_vocabulary }} {{ '%.2f' % contact_fact.confidence }}{% else %}unknown{% endif %}</td>
-          <td class="small">{% if contact_fact and contact_fact.best_evidence_document %}<a href="/evidence/{{ contact_fact.best_evidence_document.id }}">view</a>{% else %}—{% endif %}</td>
+          {% set contact_documents = intel.contact_evidence.get(row.item.id, []) %}
+          <td class="small">{% if contact_fact %}{{ contact_fact.confidence_vocabulary }} {{ '%.2f' % contact_fact.confidence }}{% else %}observed {{ '%.2f' % row.item.confidence }}{% endif %}</td>
+          <td class="small">{% if contact_documents %}<a href="/evidence/{{ contact_documents[0].id }}">view</a>{% if contact_documents|length > 1 %} +{{ contact_documents|length - 1 }}{% endif %}{% elif contact_fact and contact_fact.best_evidence_document %}<a href="/evidence/{{ contact_fact.best_evidence_document.id }}">view</a>{% else %}—{% endif %}</td>
           <td class="small">
             {% if row.origin.id == canonical.id %}—{% else %}
             <a href="/entities/{{ row.origin.id }}">{{ row.origin.canonical_name }}</a>{% endif %}

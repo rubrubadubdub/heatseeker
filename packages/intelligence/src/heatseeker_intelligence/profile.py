@@ -85,6 +85,7 @@ def assemble(session: Session, organisation_id: str) -> dict:
     classification_rows = classifications_for(session, group_ids)
     capability_rows = capabilities_for(session, group_ids)
     size_rows = estimates_for(session, group_ids)
+    contact_rows = identity["contact_points"]
     evidence_observation_ids = {
         observation_id
         for assignment in classification_rows
@@ -95,6 +96,11 @@ def assemble(session: Session, organisation_id: str) -> dict:
         for capability in capability_rows
         for entry in capability.evidence_ids
         if isinstance(entry, dict) and entry.get("observation_id")
+    )
+    evidence_observation_ids.update(
+        observation_id
+        for row in contact_rows
+        for observation_id in row["item"].source_evidence_ids
     )
     evidence_observations = {
         observation.id: observation
@@ -162,6 +168,16 @@ def assemble(session: Session, organisation_id: str) -> dict:
         ]
         for capability in capability_rows
     }
+    contact_evidence = {
+        row["item"].id: list(
+            {
+                document.id: document
+                for observation_id in row["item"].source_evidence_ids
+                if (document := evidence_document_by_observation.get(observation_id)) is not None
+            }.values()
+        )
+        for row in contact_rows
+    }
     fact_documents = {
         assertion.id: documents.get(assertion.best_evidence_document_id)
         for assertion in assertions
@@ -185,6 +201,7 @@ def assemble(session: Session, organisation_id: str) -> dict:
         "classification_evidence": classification_evidence,
         "capabilities": capability_rows,
         "capability_evidence": capability_evidence,
+        "contact_evidence": contact_evidence,
         "contradicted_capabilities": [
             c for c in capability_rows if c.capability_status == "contradicted"
         ],

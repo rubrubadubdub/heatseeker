@@ -128,11 +128,20 @@ sources:
   - name: Yellow Pages Australia
     category: directory
     url: https://www.yellowpages.com.au/
-    access: html
+    access: manual
     jurisdiction: AU
     authority_tier: 5
     terms_status: unreviewed
-    notes: Discovery only; directory pollution risk (spec §39.1).
+    notes: Discovery only; capture a public listing URL and corroborate it elsewhere.
+      No automated collection until terms and access are approved.
+  - name: Yellow Pages New Zealand
+    category: directory
+    url: https://yellow.co.nz/
+    access: manual
+    jurisdiction: NZ
+    authority_tier: 5
+    terms_status: unreviewed
+    notes: Discovery only; directory listing evidence is weak until corroborated.
   - name: hipages (trades directory)
     category: directory
     url: https://hipages.com.au/
@@ -188,7 +197,49 @@ sources:
     jurisdiction: AU/NZ
     authority_tier: 6
     terms_status: unreviewed
-    notes: Manual-only capture; many small operators are social-only (no website).
+    notes: Manual-only public-profile capture; many small operators are social-only.
+      A profile is a discovery identity, not permission to scrape or a verified fact.
+  - name: Instagram public business profiles
+    category: weak_signal
+    url: https://www.instagram.com/
+    access: manual
+    jurisdiction: AU/NZ
+    authority_tier: 6
+    terms_status: unreviewed
+    notes: Manual-only public-profile capture; corroborate names, phones, locations,
+      domains, and company claims against independent sources.
+  - name: LinkedIn public organisation pages
+    category: weak_signal
+    url: https://www.linkedin.com/company/
+    access: manual
+    jurisdiction: AU/NZ
+    authority_tier: 6
+    terms_status: unreviewed
+    notes: Organisation pages only. Personal profiles are outside company discovery.
+  - name: YouTube public company channels
+    category: weak_signal
+    url: https://www.youtube.com/
+    access: manual
+    jurisdiction: AU/NZ
+    authority_tier: 6
+    terms_status: unreviewed
+    notes: Public channel identity only; videos and claims require separate evidence.
+  - name: TikTok public business profiles
+    category: weak_signal
+    url: https://www.tiktok.com/
+    access: manual
+    jurisdiction: AU/NZ
+    authority_tier: 6
+    terms_status: unreviewed
+    notes: Manual-only public-profile capture; no research-API or scraping assumption.
+  - name: X public business profiles
+    category: weak_signal
+    url: https://x.com/
+    access: manual
+    jurisdiction: AU/NZ
+    authority_tier: 6
+    terms_status: unreviewed
+    notes: Manual-only public-profile capture and cross-source corroboration.
 
 # --- Expansion beyond this list --------------------------------------------
 discovery:
@@ -200,6 +251,7 @@ discovery:
     - association_member_lists
     - manufacturer_distributor_pages
     - project_participant_pages
+    - public_social_profiles
     - reddit_and_forums
     - regional_directories
     - industry_newsletters
@@ -209,4 +261,11 @@ discovery:
     - "access equipment {region}"
     - "temporary works design {region}"
     - "scaffold design drafting services"
+    - "site:instagram.com scaffolding {region}"
+    - "site:facebook.com scaffolding {region}"
+    - "site:linkedin.com/company scaffolding {region}"
+    - "site:youtube.com scaffolding {region}"
+    - "site:tiktok.com scaffolding {region}"
+    - "site:yellowpages.com.au scaffolding {region}"
+    - "site:yellow.co.nz scaffolding {region}"
     - "site:reddit.com scaffolding {region}"

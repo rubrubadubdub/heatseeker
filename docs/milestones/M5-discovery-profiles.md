@@ -128,3 +128,14 @@ directories cannot outvote a primary authority, while preserving the disagreemen
 - Corroboration collapses source-copy/ownership lineage, cached facts and capabilities
   age without new evidence, and system-generated gap questions close when the underlying
   evidence gap is filled.
+- Public business profiles from Instagram, Facebook, LinkedIn organisations, YouTube,
+  TikTok, X, Threads, Pinterest, and Reddit communities import as normalised,
+  evidence-linked, multi-valued contact identities. The generic social column supports
+  mixed URLs, while platform columns also accept handles.
+- Exact shared public-profile URLs strengthen the same M4 resolution queue used by
+  registers, domains, phones, addresses, and names. They are never deterministic merge
+  keys: a profile by itself remains human review, preserving the ability to assemble
+  evidence across many sources without conflating similarly named businesses.
+- Permitted crawls can propose exact linked public profiles with discovery lineage, but
+  those proposals are manual-only weak signals and are never fetched automatically.
+  No stored platform-login page is required; future official API tokens remain external.
