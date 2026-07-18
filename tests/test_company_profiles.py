@@ -3,7 +3,11 @@
 import httpx
 from heatseeker_common.db import session_scope
 from heatseeker_entity_resolution import entities
-from heatseeker_intelligence.company_profiles import fetch_and_extract
+from heatseeker_intelligence.company_profiles import (
+    entity_research_queries,
+    fetch_and_extract,
+    verify_and_attach_domain,
+)
 from heatseeker_intelligence.models import CapabilityAssignment, Observation
 from heatseeker_intelligence.page_extraction import extract_signals
 from heatseeker_lead_intelligence import service
@@ -131,8 +135,9 @@ def test_claimed_design_counts_against_need_gap(engine, settings):
         )
         fetch_and_extract(session, settings, org.id, transport=_mock_site_transport())
         score = score_organisation(session, org, offering)
-        assert score.components["need_likelihood"] == 0.2
-        assert any("internal capability already" in risk for risk in score.risks)
+        # Self-claimed in-house design → secondary target, not disqualified.
+        assert score.components["need_likelihood"] == 0.45
+        assert any("secondary target" in r["text"] for r in score.reasons)
 
 
 def test_robots_disallow_blocks_page(engine, settings):

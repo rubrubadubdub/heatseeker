@@ -155,12 +155,15 @@ def score_organisation(
     else:
         service_fit = 0.5
 
-    # --- need likelihood (§19.3 — absence of a gap capability is a hypothesis) ----
+    # --- need likelihood (§19.3) ---------------------------------------------
+    # Two distinct opportunity shapes for a design/drafting-outsourcing offering:
+    #   • no visible in-house capability → PRIMARY (they need a drafting partner)
+    #   • has in-house capability        → SECONDARY (overflow / supplant work) —
+    #     a real lead, positioned differently, NOT disqualified.
+    # (Detected "in-house design" is often an outsourced partner's work presented as
+    # the company's own, which is exactly why presence must not zero out need.)
     need = 0.5
     if offering.need_gap_capability_ids:
-        # A need-gap capability counts as present even when only CLAIMED: a company
-        # advertising "in-house design" on its own site is telling us not to pitch
-        # design outsourcing, regardless of independent corroboration (§19.3/§19.4).
         gaps_present = [
             capability_by_id[cap_id]
             for cap_id in offering.need_gap_capability_ids
@@ -179,10 +182,15 @@ def score_organisation(
             if cap_id not in capability_by_id
         ]
         if gaps_present:
-            need = 0.2
+            need = 0.45  # secondary opportunity, not a disqualifier
             names = ", ".join(g.capability_label or g.capability_id for g in gaps_present)
-            result.risks.append(
-                f"appears to have internal capability already: {names} (§19.4)"
+            result.reasons.append(
+                _reason(
+                    "need_likelihood",
+                    f"has in-house {names} — secondary target: position as overflow "
+                    "capacity or to supplant their current drafting",
+                    [f"capability:{g.id}" for g in gaps_present],
+                )
             )
         elif missing:
             need = 0.7
@@ -190,7 +198,7 @@ def score_organisation(
                 _reason(
                     "need_likelihood",
                     "no visible internal capability for: " + ", ".join(missing) + " — "
-                    "hypothesis, not a confirmed gap",
+                    "primary drafting-partner opportunity (hypothesis, not a confirmed gap)",
                 )
             )
             result.unknowns.append(

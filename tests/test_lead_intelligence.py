@@ -136,8 +136,9 @@ def test_negative_indicators_and_gap_presence(engine):
         project_source = make_source(session, "Projects", category="project_registry")
         _add_capability(session, equipped, "scaffold_design", project_source)
         equipped_score = score_organisation(session, equipped, offering)
-        assert any("internal capability already" in risk for risk in equipped_score.risks)
-        assert equipped_score.components["need_likelihood"] == 0.2
+        # In-house design = secondary opportunity (overflow/supplant), not disqualified.
+        assert equipped_score.components["need_likelihood"] == 0.45
+        assert any("secondary target" in r["text"] for r in equipped_score.reasons)
 
         merged = entities.create_organisation(session, "Ghost Co")
         merged.status = "inactive"
@@ -181,6 +182,7 @@ def test_xlsx_export_full_columns_and_suppression(engine):
     with session_scope(engine) as session:
         offering = _offering(session)
         lead_org = _classified_org(session, "Acme Scaffolding Pty Ltd")
+        lead_org.description = "Commercial scaffolding contractor"
         entities.add_identifier(session, lead_org, "abn", "51824753556")
         entities.add_domain(session, lead_org, "acme.com.au")
         entities.add_contact_point(
