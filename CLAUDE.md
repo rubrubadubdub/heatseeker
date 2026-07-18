@@ -39,10 +39,17 @@ identity/authority handling (`/discovery`), and the merge-safe profile workspace
 (`heatseeker_knowledge_graph`, migration 0017): projects + typed participation,
 directed evidence-backed relationships (end keeps dates, retract keeps the row),
 derived co-participation edges, bounded multi-hop queries with per-hop confidence,
-`/projects` workspace + entity "Connections" section + `/api/graph/*`. A **guided
-operating layer** wraps it all: dashboard "Next steps" checklist + one-click
-`pipeline.advance` job, and orientation intros on dense pages — keep new features
-wired into `guidance.py`. 266 tests green. M7 (news, events, macro signals) next.
+`/projects` workspace + entity "Connections" section + `/api/graph/*`; graph writes are
+evidence-validated (confidence >0.5 and probable/confirmed participation require real
+evidence references). **M8 lead intelligence is done, built before M7 (ADR-0015)**
+(`heatseeker_lead_intelligence`, migration 0018): user-tunable offerings, deterministic
+explained scoring (every §19.2 dimension with evidence-cited reasons, unknowns instead
+of fabricated values), §20.2 contactability, reversible suppression respected in queue
+and exports, `/leads` queue UI + full-detail XLSX export; lead timing is a declared
+neutral stub until M7. A **guided operating layer** wraps it all: dashboard "Next
+steps" checklist + one-click `pipeline.advance` job, and orientation intros on dense
+pages — keep new features wired into `guidance.py`. 279 tests green. M7 (news, events,
+macro signals) next — replaces the lead timing stub.
 Check [docs/roadmap.md](docs/roadmap.md) for milestone status before starting any work.
 Dev loop: `uv sync` · `uv run pytest -q` · `uv run ruff check .` · `uv run heatseeker run`
 User launch path: `Heatseeker.bat` (repo root) / desktop shortcut → `heatseeker run`

@@ -23,8 +23,8 @@ detail: read the spec section for the milestone via
 | M5 | Company discovery & profile | **Done** (2026-07-12; adversarially hardened same day) | [M5-discovery-profiles.md](milestones/M5-discovery-profiles.md) | Merge-safe evidence chain; conservative identity matching/authority; immutable scope snapshots; CSV/ZIP pack-claim discovery; durable failure audit (migrations 0015–0016) |
 | M6 | Projects, relationships, graph | **Done** (2026-07-13, acceptance verified) | [M6-projects-graph.md](milestones/M6-projects-graph.md) | Relational graph (§23.3); edges never deleted — end keeps dates, retract keeps audit; derived co-participation edges; BFS paths with per-hop confidence |
 | — | Guided operating layer (dashboard next-steps checklist, `pipeline.advance` one-click job, page orientation intros) | **Done** (2026-07-13) | — | Hand-holding with granular controls intact; wire new features into `guidance.py` |
-| M7 | News, events, macro signals | Not started | — | |
-| M8 | Lead intelligence | Not started | — | |
+| M7 | News, events, macro signals | Not started | — | Deliberately after M8 (ADR-0015); will replace the lead timing stub |
+| M8 | Lead intelligence | **Done** (2026-07-18, acceptance verified; built before M7 per ADR-0015) | [M8-lead-intelligence.md](milestones/M8-lead-intelligence.md) | Offerings are user-tunable DB rows; every score dimension explained with evidence refs; suppression respected everywhere incl. the XLSX export (pulled forward from M10); timing = declared neutral stub until M7 |
 | M9 | Macro market workspace | Not started | — | |
 | M10 | Programmatic action & integrations | Not started | — | |
 | M11 | AI-assisted intelligence | Not started | — | |
