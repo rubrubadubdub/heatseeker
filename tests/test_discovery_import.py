@@ -2,6 +2,7 @@
 
 import io
 import zipfile
+from datetime import UTC, datetime
 
 import pytest
 from heatseeker_common.db import session_scope
@@ -9,11 +10,15 @@ from heatseeker_common.models import Job
 from heatseeker_entity_resolution import entities
 from heatseeker_intelligence import discovery
 from heatseeker_intelligence.models import (
+    AssignmentType,
     BulkImportRun,
     CapabilityAssignment,
+    CapabilityStatus,
     ClassificationAssignment,
     FactAssertion,
+    FactStatus,
     ImportRunStatus,
+    NormalisationStatus,
     Observation,
     SizeEstimate,
 )
@@ -163,6 +168,35 @@ def test_single_csv_zip_import_preserves_archive_and_rejects_ambiguity(engine, s
         archive.writestr("two.csv", b"Name\nTwo\n")
     with pytest.raises(ValueError, match="exactly one CSV"):
         discovery._csv_payload(settings, ambiguous.getvalue())
+
+
+def test_jsonl_import_removes_csv_conversion_bottleneck(engine, settings):
+    content = (
+        b'{"company":"Structured Co","abn":12345678901,"state":"QLD"}\n'
+        b'"not an object"\n'
+    )
+    mapping = discovery.MappingSpec(
+        columns={"name": "company", "identifier": "abn", "region": "state"},
+        constants={"identifier_scheme": "abn", "country": "AU"},
+    )
+    with session_scope(engine) as session:
+        run = discovery.create_import_run(
+            session,
+            settings,
+            content,
+            dataset_name="Registry JSON Lines",
+            mapping=mapping,
+            filename="registry.jsonl",
+            enqueue=False,
+        )
+        discovery.execute_import(session, settings, run.id, content)
+        assert run.row_count == 2
+        assert run.imported_count == 1
+        assert run.rejected_count == 1
+        assert run.rejected_samples == [{"row": 2, "reason": "row is not an object"}]
+        organisation = entities.list_organisations(session)[0]
+        assert organisation.canonical_name == "Structured Co"
+        assert organisation.identifiers[0].value_normalised == "12345678901"
 
 
 def test_reimport_same_file_refused_and_identifier_matching_dedupes(engine, settings):
@@ -320,6 +354,15 @@ def test_import_populates_pack_classifications_and_capabilities(engine, settings
             "scaffold_design",
             "hire",
         }
+        assert all(
+            assignment.assignment_type == AssignmentType.OBSERVED
+            and assignment.confidence < 0.5
+            for assignment in assignments
+        )
+        assert all(
+            capability.capability_status == CapabilityStatus.UNCERTAIN
+            for capability in capabilities
+        )
         from heatseeker_intelligence import profile
 
         organisation_id = assignments[0].entity_id
@@ -339,6 +382,128 @@ def test_import_populates_pack_classifications_and_capabilities(engine, settings
                 )
             ).scalars()
         )
+
+
+def test_import_enforces_industry_and_target_facets(engine, settings):
+    content = (
+        b"Name,State,Town,Services\n"
+        b"Target Hire,QLD,Brisbane,hire|transport\n"
+        b"Wrong Service,QLD,Brisbane,erection\n"
+        b"Unknown Service,QLD,Brisbane,\n"
+    )
+    mapping = discovery.MappingSpec(
+        columns={
+            "name": "Name",
+            "region": "State",
+            "locality": "Town",
+            "service_claim": "Services",
+        },
+        constants={"country": "AU", "pack_id": "scaffolding_anz"},
+    )
+    with session_scope(engine) as session:
+        scope = create_scope(
+            session,
+            "QLD scaffolding hire",
+            "AU-QLD",
+            industry_ids_raw="scaffolding_anz",
+            target_filters={"service": {"include": ["hire"], "exclude": ["erection"]}},
+            include_unknown=False,
+        )
+        set_active(session, scope.id)
+        run = discovery.create_import_run(
+            session,
+            settings,
+            content,
+            dataset_name="Targeted member extract",
+            mapping=mapping,
+            enqueue=False,
+        )
+        discovery.execute_import(session, settings, run.id, content)
+        assert run.imported_count == 1
+        assert run.skipped_out_of_scope_count == 2
+        assert {row.canonical_name for row in entities.list_organisations(session)} == {
+            "Target Hire"
+        }
+
+
+def test_import_uses_dataset_coverage_date_for_freshness(engine, settings):
+    content = b"Name,ABN\nOld Registry Co,12345678901\n"
+    mapping = discovery.MappingSpec(
+        columns={"name": "Name", "identifier": "ABN"},
+        constants={"identifier_scheme": "abn"},
+    )
+    with session_scope(engine) as session:
+        run = discovery.create_import_run(
+            session,
+            settings,
+            content,
+            dataset_name="Historical registry snapshot",
+            mapping=mapping,
+            coverage_date="2000-01-02",
+            enqueue=False,
+        )
+        discovery.execute_import(session, settings, run.id, content)
+        observations = list(session.scalars(select(Observation)).all())
+        assert observations
+        assert all(
+            row.observed_at == datetime(2000, 1, 2, tzinfo=UTC) for row in observations
+        )
+        assertions = list(session.scalars(select(FactAssertion)).all())
+        assert assertions
+        assert all(row.status == FactStatus.STALE for row in assertions)
+        assert run.transformation_version == "import/0.3"
+
+    with session_scope(engine) as session, pytest.raises(ValueError, match="coverage_date"):
+        discovery.create_import_run(
+            session,
+            settings,
+            b"Name\nBad Date Co\n",
+            dataset_name="Invalid historical snapshot",
+            mapping=discovery.MappingSpec(columns={"name": "Name"}),
+            coverage_date="18/07/2026",
+            enqueue=False,
+        )
+
+
+def test_invalid_cells_remain_inspectable_rejected_observations(engine, settings):
+    content = (
+        b"Name,Web,Employees,Services,Archetype\n"
+        b"Messy Co,http:///,lots,not_a_real_service,not_a_real_archetype\n"
+    )
+    mapping = discovery.MappingSpec(
+        columns={
+            "name": "Name",
+            "domain": "Web",
+            "employees_band": "Employees",
+            "service_claim": "Services",
+            "archetype_claim": "Archetype",
+        },
+        constants={"pack_id": "scaffolding_anz"},
+    )
+    with session_scope(engine) as session:
+        run = discovery.create_import_run(
+            session,
+            settings,
+            content,
+            dataset_name="Messy extract",
+            mapping=mapping,
+            enqueue=False,
+        )
+        discovery.execute_import(session, settings, run.id, content)
+        rejected = list(
+            session.scalars(
+                select(Observation).where(
+                    Observation.normalisation_status == NormalisationStatus.REJECTED
+                )
+            ).all()
+        )
+        assert {row.predicate for row in rejected} == {
+            "website_domain",
+            "employee_count_band",
+            "service_claim",
+            "archetype_claim",
+        }
+        assert all(row.extraction_confidence == 0 for row in rejected)
 
 
 def test_failed_run_records_error(engine, settings):

@@ -63,9 +63,11 @@ def generate_for(session: Session, organisation_id: str) -> list[ResearchQuestio
     canonical = group[0]
     name = canonical.canonical_name
     existing_types = _open_types(session, canonical.id)
+    needed_types: set[str] = set()
     created: list[ResearchQuestion] = []
 
     def ask(question_type, text, reason, priority):
+        needed_types.add(question_type)
         question = _ask(
             session, canonical.id, question_type, text, reason, priority, existing_types
         )
@@ -136,6 +138,24 @@ def generate_for(session: Session, organisation_id: str) -> list[ResearchQuestio
                 f"freshness score {assertion.freshness_score} below threshold",
                 0.55,
             )
+
+    obsolete = session.scalars(
+        select(ResearchQuestion).where(
+            ResearchQuestion.entity_id == canonical.id,
+            ResearchQuestion.generated_by == "system",
+            ResearchQuestion.status.in_([QuestionStatus.OPEN, QuestionStatus.IN_PROGRESS]),
+        )
+    ).all()
+    for question in obsolete:
+        if question.question_type in needed_types:
+            continue
+        question.status = QuestionStatus.RESOLVED
+        question.resolution = {
+            "by": "system",
+            "note": "underlying evidence gap is no longer present",
+            "at": utc_now().isoformat(),
+        }
+        question.updated_at = utc_now()
 
     session.flush()
     return created

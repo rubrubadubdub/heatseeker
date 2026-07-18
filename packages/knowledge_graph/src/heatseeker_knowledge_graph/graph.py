@@ -9,12 +9,14 @@ rather than laundered.
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from heatseeker_common import audit
 from heatseeker_common.timeutil import utc_now
 from heatseeker_entity_resolution.models import Organisation
 from heatseeker_entity_resolution.resolution import canonical_id, merge_group
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
+from heatseeker_knowledge_graph.evidence import validate_confidence, validate_evidence_ids
 from heatseeker_knowledge_graph.models import (
     ParticipationStatus,
     ProjectParticipation,
@@ -24,7 +26,6 @@ from heatseeker_knowledge_graph.models import (
 
 MAX_PATH_DEPTH = 4
 _TRAVERSABLE_PARTICIPATION = (
-    ParticipationStatus.UNCONFIRMED,
     ParticipationStatus.PROBABLE,
     ParticipationStatus.CONFIRMED,
 )
@@ -78,6 +79,11 @@ def add_relationship(
             "subject and object resolve to the same organisation — a relationship "
             "needs two distinct entities"
         )
+    if session.get(Organisation, subject_id) is None:
+        raise LookupError(f"organisation not found: {subject_id}")
+    if session.get(Organisation, object_id) is None:
+        raise LookupError(f"organisation not found: {object_id}")
+    evidence = validate_evidence_ids(session, evidence_ids)
 
     open_edge = session.execute(
         select(Relationship).where(
@@ -88,49 +94,92 @@ def add_relationship(
         )
     ).scalar_one_or_none()
     if open_edge is not None:
-        open_edge.evidence_ids = sorted(set(open_edge.evidence_ids) | set(evidence_ids or []))
-        open_edge.confidence = max(open_edge.confidence, confidence)
+        combined_evidence = sorted(set(open_edge.evidence_ids) | set(evidence))
+        validated_confidence = validate_confidence(
+            confidence, has_evidence=bool(combined_evidence)
+        )
+        open_edge.evidence_ids = combined_evidence
+        open_edge.confidence = max(open_edge.confidence, validated_confidence)
         open_edge.updated_at = utc_now()
         session.flush()
+        audit.record(
+            session,
+            created_by,
+            "relationship.updated",
+            "relationship",
+            open_edge.id,
+            {"confidence": open_edge.confidence, "evidence_count": len(combined_evidence)},
+        )
         return open_edge
 
     edge = Relationship(
         subject_entity_id=subject_id,
         object_entity_id=object_id,
         relationship_type=relationship_type,
-        confidence=max(0.0, min(1.0, confidence)),
+        confidence=validate_confidence(confidence, has_evidence=bool(evidence)),
         valid_from=valid_from or utc_now(),
-        evidence_ids=sorted(set(evidence_ids or [])),
+        evidence_ids=evidence,
         created_by=created_by,
     )
     session.add(edge)
     session.flush()
+    audit.record(
+        session,
+        created_by,
+        "relationship.created",
+        "relationship",
+        edge.id,
+        {"relationship_type": relationship_type, "confidence": edge.confidence},
+    )
     return edge
 
 
-def _close(session: Session, relationship_id: str, status: str, when: datetime | None):
+def _close(
+    session: Session,
+    relationship_id: str,
+    status: str,
+    when: datetime | None,
+    actor: str,
+):
     edge = session.get(Relationship, relationship_id)
     if edge is None:
         raise LookupError(f"relationship not found: {relationship_id}")
     if edge.status != RelationshipStatus.ACTIVE:
         raise GraphError(f"relationship is already {edge.status} — history is immutable")
+    valid_to = when or utc_now()
+    if edge.valid_from is not None and valid_to < edge.valid_from:
+        raise GraphError("valid_to must not precede valid_from")
     edge.status = status
-    edge.valid_to = when or utc_now()
+    edge.valid_to = valid_to
     edge.updated_at = utc_now()
     session.flush()
+    audit.record(
+        session,
+        actor,
+        "relationship.closed",
+        "relationship",
+        edge.id,
+        {"status": status, "valid_to": edge.valid_to.isoformat()},
+    )
     return edge
 
 
 def end_relationship(
-    session: Session, relationship_id: str, *, valid_to: datetime | None = None
+    session: Session,
+    relationship_id: str,
+    *,
+    valid_to: datetime | None = None,
+    actor: str = "user",
 ) -> Relationship:
     """The relationship genuinely ended — dates retained (acceptance: history)."""
-    return _close(session, relationship_id, RelationshipStatus.HISTORICAL, valid_to)
+    return _close(session, relationship_id, RelationshipStatus.HISTORICAL, valid_to, actor)
 
 
-def retract_relationship(session: Session, relationship_id: str) -> Relationship:
+def retract_relationship(
+    session: Session, relationship_id: str, *, actor: str = "user"
+) -> Relationship:
     """The edge was judged wrong — kept for audit, excluded from traversal."""
-    return _close(session, relationship_id, RelationshipStatus.RETRACTED, None)
+    return _close(session, relationship_id, RelationshipStatus.RETRACTED, None, actor)
 
 
 def _group_ids(session: Session, entity_id: str) -> list[str]:
@@ -175,35 +224,73 @@ def edges_for(
         )
 
     mine = session.execute(
-        select(ProjectParticipation).where(
+        select(ProjectParticipation)
+        .options(selectinload(ProjectParticipation.project))
+        .where(
             ProjectParticipation.organisation_id.in_(group_ids),
             ProjectParticipation.status.in_(_TRAVERSABLE_PARTICIPATION),
         )
     ).scalars().all()
-    for participation in mine:
-        peers = session.execute(
+    project_ids = {participation.project_id for participation in mine}
+    peers = (
+        session.scalars(
             select(ProjectParticipation).where(
-                ProjectParticipation.project_id == participation.project_id,
+                ProjectParticipation.project_id.in_(project_ids),
                 ProjectParticipation.organisation_id.not_in(group_ids),
                 ProjectParticipation.status.in_(_TRAVERSABLE_PARTICIPATION),
             )
-        ).scalars()
-        for peer in peers:
-            edges.append(
-                Edge(
-                    kind="project",
-                    label=f"co-participant on {participation.project.name}",
-                    direction="both",
-                    other_id=canonical_id(session, peer.organisation_id),
-                    confidence=round(min(participation.confidence, peer.confidence), 3),
-                    evidence_count=len(participation.evidence_ids) + len(peer.evidence_ids),
-                    ref_id=participation.project_id,
-                    detail={
-                        "my_role": participation.role_type,
-                        "their_role": peer.role_type,
-                    },
-                )
+        ).all()
+        if project_ids
+        else []
+    )
+    peers_by_project: dict[str, list[ProjectParticipation]] = {}
+    for peer in peers:
+        peers_by_project.setdefault(peer.project_id, []).append(peer)
+
+    project_edges: dict[tuple[str, str], dict] = {}
+    for participation in mine:
+        for peer in peers_by_project.get(participation.project_id, []):
+            other_id = canonical_id(session, peer.organisation_id)
+            key = (participation.project_id, other_id)
+            candidate_confidence = round(
+                min(participation.confidence, peer.confidence), 3
             )
+            aggregate = project_edges.setdefault(
+                key,
+                {
+                    "project_name": participation.project.name,
+                    "confidence": candidate_confidence,
+                    "evidence_ids": set(),
+                    "my_roles": set(),
+                    "their_roles": set(),
+                },
+            )
+            aggregate["confidence"] = max(aggregate["confidence"], candidate_confidence)
+            aggregate["evidence_ids"].update(participation.evidence_ids)
+            aggregate["evidence_ids"].update(peer.evidence_ids)
+            aggregate["my_roles"].add(participation.role_type)
+            aggregate["their_roles"].add(peer.role_type)
+    for (project_id, other_id), aggregate in project_edges.items():
+        my_roles = sorted(aggregate["my_roles"])
+        their_roles = sorted(aggregate["their_roles"])
+        detail = {
+            "my_role": my_roles[0] if len(my_roles) == 1 else ", ".join(my_roles),
+            "their_role": (
+                their_roles[0] if len(their_roles) == 1 else ", ".join(their_roles)
+            ),
+        }
+        edges.append(
+            Edge(
+                kind="project",
+                label=f"co-participant on {aggregate['project_name']}",
+                direction="both",
+                other_id=other_id,
+                confidence=aggregate["confidence"],
+                evidence_count=len(aggregate["evidence_ids"]),
+                ref_id=project_id,
+                detail=detail,
+            )
+        )
     return edges
 
 

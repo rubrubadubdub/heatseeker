@@ -9,9 +9,11 @@ Rows outside the active research scope are counted and skipped (scope rule for M
 
 import csv
 import io
+import json
 import re
 import zipfile
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, time
 
 from heatseeker_common import audit, jobs
 from heatseeker_common.models import PriorityClass
@@ -43,13 +45,14 @@ from heatseeker_source_registry.models import (
 from heatseeker_source_registry.rawstore import read_bytes, store_bytes
 from heatseeker_source_registry.scopes import active_scope
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from heatseeker_intelligence import capabilities, classifications, facts, gaps, sizing
 from heatseeker_intelligence.models import (
     BulkImportRun,
     ExtractionMethod,
     ImportRunStatus,
+    NormalisationStatus,
 )
 from heatseeker_intelligence.observations import (
     PREDICATE_ARCHETYPE_CLAIM,
@@ -64,7 +67,7 @@ from heatseeker_intelligence.observations import (
     record_observation,
 )
 
-TRANSFORMATION_VERSION = "import/0.2"
+TRANSFORMATION_VERSION = "import/0.3"
 _MAX_REJECTED_SAMPLES = 20
 
 # Mapping fields → observation predicates handled by the importer. "columns" maps a
@@ -132,6 +135,64 @@ class MappingSpec:
 
     def as_dict(self) -> dict:
         return {"columns": self.columns, "constants": self.constants}
+
+
+@dataclass
+class _OrganisationIndex:
+    """Import-local identity index; avoids scanning every organisation for every row."""
+
+    identifiers: dict[tuple[str, str], Organisation] = field(default_factory=dict)
+    names_and_places: dict[tuple[str, str, str], Organisation] = field(default_factory=dict)
+    ambiguous_names_and_places: set[tuple[str, str, str]] = field(default_factory=set)
+
+    @classmethod
+    def build(cls, session: Session) -> "_OrganisationIndex":
+        index = cls()
+        organisations = session.scalars(
+            select(Organisation)
+            .where(Organisation.merged_into_id.is_(None))
+            .options(selectinload(Organisation.identifiers))
+        ).all()
+        for organisation in organisations:
+            index.add(organisation)
+        return index
+
+    def add(self, organisation: Organisation) -> None:
+        for identifier in organisation.identifiers:
+            self.identifiers[(identifier.scheme, identifier.value_normalised)] = organisation
+        location = organisation.primary_location
+        if location is None or not location.locality or not location.country:
+            return
+        key = (
+            normalise_name(organisation.canonical_name),
+            location.locality.casefold(),
+            location.country.casefold(),
+        )
+        if key in self.ambiguous_names_and_places:
+            return
+        existing = self.names_and_places.get(key)
+        if existing is not None and existing.id != organisation.id:
+            self.names_and_places.pop(key, None)
+            self.ambiguous_names_and_places.add(key)
+        else:
+            self.names_and_places[key] = organisation
+
+
+def _parse_coverage_date(value: str | None) -> datetime | None:
+    """Parse dataset currency separately from retrieval/import time."""
+
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        if len(raw) == 10:
+            return datetime.combine(date.fromisoformat(raw), time.min, tzinfo=UTC)
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("coverage_date must be ISO 8601 (for example 2026-07-18)") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _bulk_source(
@@ -267,19 +328,72 @@ def _scope_snapshot(session: Session) -> dict | None:
     }
 
 
-def _in_scope(scope: dict | None, mapping: MappingSpec, row: dict) -> bool:
-    if scope is None or not (scope.get("geo_codes") or scope.get("exclude_codes")):
+def _in_scope(
+    scope: dict | None, mapping: MappingSpec, row: dict, *, pack_id: str | None
+) -> bool:
+    if scope is None:
         return True
-    codes = _row_geo_codes(mapping, row)
-    exclude = list(scope.get("exclude_codes") or [])
-    if codes and exclude and match_geography(codes, exclude, mode=GeographyMatchMode.OVERLAPS):
+    include_unknown = bool(scope.get("include_unknown"))
+
+    requested_geography = list(scope.get("geo_codes") or [])
+    excluded_geography = list(scope.get("exclude_codes") or [])
+    if requested_geography or excluded_geography:
+        codes = _row_geo_codes(mapping, row)
+        if codes and excluded_geography and match_geography(
+            codes, excluded_geography, mode=GeographyMatchMode.OVERLAPS
+        ):
+            return False
+        if requested_geography and not match_geography(
+            codes,
+            requested_geography,
+            mode=GeographyMatchMode.OVERLAPS,
+            include_unknown=include_unknown,
+        ):
+            return False
+
+    requested_industries = {
+        str(value).strip().casefold() for value in scope.get("industry_ids") or [] if value
+    }
+    row_pack = (mapping.value(row, "pack_id") or pack_id or "").strip().casefold()
+    if requested_industries and (
+        (not row_pack and not include_unknown)
+        or (row_pack and row_pack not in requested_industries)
+    ):
         return False
-    return match_geography(
-        codes,
-        list(scope.get("geo_codes") or []),
-        mode=GeographyMatchMode.OVERLAPS,
-        include_unknown=bool(scope.get("include_unknown")),
-    )
+
+    row_facets = {
+        "industry": [row_pack] if row_pack else [],
+        "service": _split_claims(mapping.value(row, "service_claim")),
+        "capability": _split_claims(mapping.value(row, "service_claim")),
+        "archetype": _split_claims(mapping.value(row, "archetype_claim")),
+        "company_archetype": _split_claims(mapping.value(row, "archetype_claim")),
+    }
+    for raw_dimension, raw_wanted in (scope.get("target_filters") or {}).items():
+        dimension = str(raw_dimension).strip().casefold()
+        if isinstance(raw_wanted, dict):
+            include_values = raw_wanted.get("include") or []
+            exclude_values = raw_wanted.get("exclude") or []
+        else:
+            include_values = raw_wanted if isinstance(raw_wanted, (list, tuple)) else [raw_wanted]
+            exclude_values = []
+        wanted = {str(value).strip().casefold() for value in include_values if value}
+        excluded = {str(value).strip().casefold() for value in exclude_values if value}
+        if not wanted and not excluded:
+            continue
+        known = row_facets.get(dimension)
+        if known is None:
+            if not include_unknown:
+                return False
+            continue
+        present = {value.casefold() for value in known}
+        if present.intersection(excluded):
+            return False
+        if present:
+            if wanted and not present.intersection(wanted):
+                return False
+        elif wanted and not include_unknown:
+            return False
+    return True
 
 
 def _find_organisation(
@@ -290,8 +404,12 @@ def _find_organisation(
     name: str,
     locality: str | None,
     country: str | None,
+    index: _OrganisationIndex | None = None,
 ) -> Organisation | None:
     if scheme and identifier:
+        key = (scheme, normalise_identifier(identifier))
+        if index is not None and key in index.identifiers:
+            return index.identifiers[key]
         match = session.execute(
             select(OrganisationIdentifier).where(
                 OrganisationIdentifier.scheme == scheme,
@@ -305,6 +423,8 @@ def _find_organisation(
     if not locality or not country:
         return None
     name_key = normalise_name(name)
+    if index is not None:
+        return index.names_and_places.get((name_key, locality.casefold(), country.casefold()))
     candidates = session.execute(
         select(Organisation).where(Organisation.merged_into_id.is_(None))
     ).scalars()
@@ -390,6 +510,68 @@ def _csv_payload(settings: Settings, content: bytes) -> bytes:
         return archive.read(member)
 
 
+def _dataset_payload(settings: Settings, content: bytes, filename: str) -> tuple[bytes, str]:
+    """Return one bounded structured dataset and its effective member name."""
+
+    if not zipfile.is_zipfile(io.BytesIO(content)):
+        return content, filename or "dataset.csv"
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        candidates = [
+            info
+            for info in archive.infolist()
+            if not info.is_dir()
+            and info.filename.lower().endswith((".csv", ".json", ".jsonl"))
+        ]
+        if len(candidates) != 1:
+            raise ValueError("ZIP import must contain exactly one CSV, JSON, or JSONL file")
+        member = candidates[0]
+        if member.flag_bits & 0x1:
+            raise ValueError("encrypted ZIP members are not supported")
+        if member.file_size > settings.evidence_upload_max_bytes:
+            raise ValueError(
+                f"dataset in ZIP exceeds {settings.evidence_upload_max_bytes} "
+                "uncompressed bytes"
+            )
+        return archive.read(member), member.filename
+
+
+def _dataset_rows(payload: bytes, filename: str) -> list[tuple[int, dict | object]]:
+    """Decode CSV, JSON arrays/records, or JSON Lines into located row objects."""
+
+    suffix = filename.lower().rsplit("/", 1)[-1]
+    try:
+        text = payload.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("dataset must be UTF-8 encoded") from exc
+    if suffix.endswith(".jsonl"):
+        rows: list[tuple[int, dict | object]] = []
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                rows.append((line_number, json.loads(line)))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSONL on line {line_number}: {exc.msg}") from exc
+        return rows
+    if suffix.endswith(".json"):
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSON dataset: {exc.msg}") from exc
+        if isinstance(decoded, dict) and "records" in decoded:
+            decoded = decoded["records"]
+        if isinstance(decoded, dict):
+            decoded = [decoded]
+        if not isinstance(decoded, list):
+            raise ValueError("JSON dataset must be an object, an array, or contain a records array")
+        return list(enumerate(decoded, start=1))
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("CSV dataset must contain a header row")
+    return list(enumerate(reader, start=2))
+
+
 def _import_row(
     session: Session,
     document: SourceDocument,
@@ -401,11 +583,13 @@ def _import_row(
     pack_id: str | None,
     known_services: dict[str, str],
     known_archetypes: dict[str, str],
+    observed_at: datetime | None,
+    organisation_index: _OrganisationIndex,
 ) -> RowOutcome:
     name = mapping.value(row, "name")
     if not name:
         return RowOutcome(rejected_reason="missing name")
-    if not _in_scope(scope_snapshot, mapping, row):
+    if not _in_scope(scope_snapshot, mapping, row, pack_id=pack_id):
         return RowOutcome(out_of_scope=True)
 
     scheme = (mapping.value(row, "identifier_scheme") or "").lower() or None
@@ -420,6 +604,7 @@ def _import_row(
         name=name,
         locality=locality,
         country=country,
+        index=organisation_index,
     )
     matched = organisation is not None
     if organisation is None:
@@ -433,7 +618,12 @@ def _import_row(
 
     location_kwargs = {"row": row_number}
 
-    def observe(predicate: str, value, confidence: float = 0.9):
+    def observe(
+        predicate: str,
+        value,
+        confidence: float = 0.9,
+        normalisation_status: str = NormalisationStatus.NORMALISED,
+    ):
         return record_observation(
             session,
             document,
@@ -443,6 +633,8 @@ def _import_row(
             extraction_method=ExtractionMethod.IMPORT,
             extraction_confidence=confidence,
             source_location=location_kwargs,
+            observed_at=observed_at,
+            normalisation_status=normalisation_status,
         )
 
     observe(PREDICATE_CANONICAL_NAME, name)
@@ -461,7 +653,12 @@ def _import_row(
             entities.add_domain(session, organisation, domain)
             observe(PREDICATE_DOMAIN, domain.lower())
         except ValueError:
-            pass  # unusable domain cell — name row still imports
+            observe(
+                PREDICATE_DOMAIN,
+                domain,
+                confidence=0.0,
+                normalisation_status=NormalisationStatus.REJECTED,
+            )
     if locality or mapping.value(row, "postcode") or country:
         observe(
             PREDICATE_LOCATION,
@@ -484,13 +681,29 @@ def _import_row(
             )
             entities.set_primary_location(session, organisation, location)
     employees = mapping.value(row, "employees_band")
-    if employees and employees in sizing.EMPLOYEE_BANDS:
-        observe(PREDICATE_EMPLOYEES, employees, confidence=0.85)
+    if employees:
+        valid_employee_band = employees in sizing.EMPLOYEE_BANDS
+        observe(
+            PREDICATE_EMPLOYEES,
+            employees,
+            confidence=0.85 if valid_employee_band else 0.0,
+            normalisation_status=(
+                NormalisationStatus.NORMALISED
+                if valid_employee_band
+                else NormalisationStatus.REJECTED
+            ),
+        )
 
     source = session.get(SourceDefinition, document.source_definition_id)
     source_category = source.source_category if source else None
     for claim in _split_claims(mapping.value(row, "service_claim")):
         if claim not in known_services or not pack_id:
+            observe(
+                PREDICATE_SERVICE_CLAIM,
+                claim,
+                confidence=0.0,
+                normalisation_status=NormalisationStatus.REJECTED,
+            )
             continue
         observation = observe(PREDICATE_SERVICE_CLAIM, claim, confidence=0.85)
         classifications.classify_from_observations(
@@ -499,6 +712,7 @@ def _import_row(
             [observation],
             pack_id=pack_id,
             source_category=source_category,
+            authority_tier=source.authority_tier if source else 7,
             known_service_ids=known_services,
         )
         capabilities.record_capability_evidence(
@@ -510,10 +724,17 @@ def _import_row(
             observation_id=observation.id,
             source_definition_id=document.source_definition_id,
             source_category=source_category,
+            authority_tier=source.authority_tier if source else 7,
             observed_at=observation.observed_at,
         )
     for claim in _split_claims(mapping.value(row, "archetype_claim")):
         if claim not in known_archetypes or not pack_id:
+            observe(
+                PREDICATE_ARCHETYPE_CLAIM,
+                claim,
+                confidence=0.0,
+                normalisation_status=NormalisationStatus.REJECTED,
+            )
             continue
         observation = observe(PREDICATE_ARCHETYPE_CLAIM, claim, confidence=0.85)
         classifications.classify_from_observations(
@@ -522,9 +743,11 @@ def _import_row(
             [observation],
             pack_id=pack_id,
             source_category=source_category,
+            authority_tier=source.authority_tier if source else 7,
             known_archetype_ids=known_archetypes,
         )
 
+    organisation_index.add(organisation)
     return RowOutcome(
         imported=not matched, matched_existing=matched, organisation_id=organisation.id
     )
@@ -548,14 +771,25 @@ def execute_import(
     document = session.get(SourceDocument, run.source_document_id)
     if document is None:
         raise LookupError("import run has no stored dataset document")
-    text = _csv_payload(settings, content).decode("utf-8-sig", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
+    payload, effective_filename = _dataset_payload(
+        settings, content, document.original_filename or "dataset.csv"
+    )
+    reader = _dataset_rows(payload, effective_filename)
+    observed_at = _parse_coverage_date(run.coverage_date)
+    organisation_index = _OrganisationIndex.build(session)
 
     touched: set[str] = set()
     rejected_samples: list[dict] = []
     counts = {"rows": 0, "imported": 0, "matched": 0, "out_of_scope": 0, "rejected": 0}
-    for row_number, row in enumerate(reader, start=2):  # header is line 1
+    for row_number, row in reader:
         counts["rows"] += 1
+        if not isinstance(row, dict):
+            counts["rejected"] += 1
+            if len(rejected_samples) < _MAX_REJECTED_SAMPLES:
+                rejected_samples.append(
+                    {"row": row_number, "reason": "row is not an object"}
+                )
+            continue
         outcome = _import_row(
             session,
             document,
@@ -566,6 +800,8 @@ def execute_import(
             pack_id=pack_id,
             known_services=known_services,
             known_archetypes=known_archetypes,
+            observed_at=observed_at,
+            organisation_index=organisation_index,
         )
         if outcome.rejected_reason:
             counts["rejected"] += 1
@@ -637,6 +873,7 @@ def create_import_run(
         raise ValueError("dataset name is required")
     if not 1 <= authority_tier <= 7:
         raise ValueError("authority_tier must be between 1 and 7")
+    _parse_coverage_date(coverage_date)
     pack_snapshot = _pack_snapshot(mapping.constants.get("pack_id"))
     scope_snapshot = _scope_snapshot(session)
     source = _bulk_source(session, dataset_name.strip(), publisher, authority_tier)

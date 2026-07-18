@@ -99,6 +99,7 @@ def add_participant_action(
     role_type: Annotated[str, Form()],
     status: Annotated[str, Form()] = "unconfirmed",
     confidence: Annotated[float, Form()] = 0.5,
+    evidence_ids: Annotated[str, Form()] = "",
 ):
     try:
         with session_scope(request.app.state.engine) as session:
@@ -109,6 +110,7 @@ def add_participant_action(
                 role_type,
                 status=status,
                 confidence=max(0.0, min(1.0, confidence)),
+                evidence_ids=_split_ids(evidence_ids),
             )
     except (ValueError, LookupError) as exc:
         return _redirect(f"/projects/{project_id}", str(exc), "danger")
@@ -117,12 +119,18 @@ def add_participant_action(
 
 @router.post("/participations/{participation_id}/status")
 def set_participation_status_action(
-    request: Request, participation_id: str, status: Annotated[str, Form()]
+    request: Request,
+    participation_id: str,
+    status: Annotated[str, Form()],
+    evidence_ids: Annotated[str, Form()] = "",
 ):
     try:
         with session_scope(request.app.state.engine) as session:
             participation = projects.set_participation_status(
-                session, participation_id, status
+                session,
+                participation_id,
+                status,
+                evidence_ids=_split_ids(evidence_ids),
             )
             project_id = participation.project_id
     except (ValueError, LookupError) as exc:
@@ -137,6 +145,7 @@ def create_relationship_action(
     object_entity_id: Annotated[str, Form()],
     relationship_type: Annotated[str, Form()],
     confidence: Annotated[float, Form()] = 0.5,
+    evidence_ids: Annotated[str, Form()] = "",
 ):
     if relationship_type not in RELATIONSHIP_TYPES:
         return _redirect(
@@ -150,9 +159,10 @@ def create_relationship_action(
                 object_entity_id,
                 relationship_type,
                 confidence=max(0.0, min(1.0, confidence)),
+                evidence_ids=_split_ids(evidence_ids),
                 created_by="user",
             )
-    except (graph.GraphError, LookupError) as exc:
+    except (graph.GraphError, LookupError, ValueError) as exc:
         return _redirect(f"/entities/{subject_entity_id}", str(exc), "danger")
     return _redirect(f"/entities/{subject_entity_id}", "Relationship recorded")
 

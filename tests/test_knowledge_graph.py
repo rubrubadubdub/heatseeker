@@ -11,18 +11,26 @@ from heatseeker_knowledge_graph.models import (
     RelationshipStatus,
 )
 from sqlalchemy import select
+from test_intelligence_facts import make_document, make_source
 
 
 def _orgs(session, *names):
     return [entities.create_organisation(session, name) for name in names]
 
 
+def _evidence(session, label):
+    source = make_source(session, f"Graph evidence {label}")
+    return make_document(session, source, label).id
+
+
 def test_relationship_lifecycle_keeps_history(engine):
     with session_scope(engine) as session:
         acme, builder = _orgs(session, "Acme Scaffolding", "BigBuild")
+        evidence_1 = _evidence(session, "relationship-1")
+        evidence_2 = _evidence(session, "relationship-2")
         edge = graph.add_relationship(
             session, acme.id, builder.id, "supplier_to", confidence=0.7,
-            evidence_ids=["obs-1"],
+            evidence_ids=[evidence_1],
         )
         edge_id = edge.id
         assert edge.status == RelationshipStatus.ACTIVE
@@ -31,11 +39,11 @@ def test_relationship_lifecycle_keeps_history(engine):
         # Re-adding the same open edge strengthens it instead of duplicating.
         again = graph.add_relationship(
             session, acme.id, builder.id, "supplier_to", confidence=0.9,
-            evidence_ids=["obs-2"],
+            evidence_ids=[evidence_2],
         )
         assert again.id == edge_id
         assert again.confidence == 0.9
-        assert again.evidence_ids == ["obs-1", "obs-2"]
+        assert again.evidence_ids == sorted([evidence_1, evidence_2])
 
         ended = graph.end_relationship(session, edge_id)
         assert ended.status == RelationshipStatus.HISTORICAL
@@ -58,7 +66,15 @@ def test_relationship_lifecycle_keeps_history(engine):
 def test_edges_resolve_merged_organisations_to_canonical(engine):
     with session_scope(engine) as session:
         survivor, dupe, client = _orgs(session, "Acme Pty Ltd", "Acme (dupe)", "BigBuild")
-        graph.add_relationship(session, dupe.id, client.id, "supplier_to", confidence=0.8)
+        evidence_id = _evidence(session, "canonical")
+        graph.add_relationship(
+            session,
+            dupe.id,
+            client.id,
+            "supplier_to",
+            confidence=0.8,
+            evidence_ids=[evidence_id],
+        )
         perform_merge(session, survivor.id, dupe.id, rationale="same business")
 
         edges = graph.edges_for(session, survivor.id)
@@ -73,14 +89,20 @@ def test_edges_resolve_merged_organisations_to_canonical(engine):
 def test_co_participation_creates_derived_inspectable_edges(engine):
     with session_scope(engine) as session:
         acme, big = _orgs(session, "Acme Scaffolding", "BigBuild")
+        evidence_a = _evidence(session, "project-acme")
+        evidence_b = _evidence(session, "project-big")
         project = projects.create_project(session, "Hospital North Tower", status="active")
         projects.add_participation(
             session, project.id, acme.id, "scaffold_contractor",
-            status=ParticipationStatus.CONFIRMED, confidence=0.9, evidence_ids=["obs-a"],
+            status=ParticipationStatus.CONFIRMED,
+            confidence=0.9,
+            evidence_ids=[evidence_a],
         )
         projects.add_participation(
             session, project.id, big.id, "principal_contractor",
-            status=ParticipationStatus.CONFIRMED, confidence=0.7,
+            status=ParticipationStatus.CONFIRMED,
+            confidence=0.7,
+            evidence_ids=[evidence_b],
         )
         edges = graph.edges_for(session, acme.id)
         project_edges = [e for e in edges if e.kind == "project"]
@@ -106,33 +128,57 @@ def test_co_participation_creates_derived_inspectable_edges(engine):
 def test_participation_accumulates_instead_of_duplicating(engine):
     with session_scope(engine) as session:
         (acme,) = _orgs(session, "Acme Scaffolding")
+        evidence_1 = _evidence(session, "participation-1")
+        evidence_2 = _evidence(session, "participation-2")
         project = projects.create_project(session, "Bridge Refit")
         first = projects.add_participation(
             session, project.id, acme.id, "scaffold_contractor", confidence=0.4,
-            evidence_ids=["obs-1"],
+            evidence_ids=[evidence_1],
         )
         second = projects.add_participation(
             session, project.id, acme.id, "scaffold_contractor", confidence=0.8,
-            evidence_ids=["obs-2"], status=ParticipationStatus.CONFIRMED,
+            evidence_ids=[evidence_2], status=ParticipationStatus.CONFIRMED,
         )
         assert second.id == first.id
         assert second.confidence == 0.8
-        assert second.evidence_ids == ["obs-1", "obs-2"]
+        assert second.evidence_ids == sorted([evidence_1, evidence_2])
         assert second.status == ParticipationStatus.CONFIRMED
 
 
 def test_multi_hop_neighbourhood_and_paths(engine):
     with session_scope(engine) as session:
         acme, big, steel = _orgs(session, "Acme Scaffolding", "BigBuild", "SteelCo")
+        evidence_acme = _evidence(session, "path-acme")
+        evidence_big = _evidence(session, "path-big")
+        evidence_relationship = _evidence(session, "path-relationship")
         # acme —(project)— big —(relationship)— steel
         project = projects.create_project(session, "Stadium Stage 2", status="active")
         projects.add_participation(
-            session, project.id, acme.id, "scaffold_contractor", confidence=0.9
+            session,
+            project.id,
+            acme.id,
+            "scaffold_contractor",
+            status=ParticipationStatus.PROBABLE,
+            confidence=0.9,
+            evidence_ids=[evidence_acme],
         )
         projects.add_participation(
-            session, project.id, big.id, "principal_contractor", confidence=0.8
+            session,
+            project.id,
+            big.id,
+            "principal_contractor",
+            status=ParticipationStatus.PROBABLE,
+            confidence=0.8,
+            evidence_ids=[evidence_big],
         )
-        graph.add_relationship(session, big.id, steel.id, "supplier_to", confidence=0.6)
+        graph.add_relationship(
+            session,
+            big.id,
+            steel.id,
+            "supplier_to",
+            confidence=0.6,
+            evidence_ids=[evidence_relationship],
+        )
 
         near = graph.neighbourhood(session, acme.id, depth=1)
         assert [n.organisation.id for n in near] == [big.id]

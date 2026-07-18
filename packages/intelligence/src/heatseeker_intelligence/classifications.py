@@ -41,7 +41,9 @@ BUSINESS_MODELS = (
 _CATEGORY_ASSIGNMENT: dict[str, tuple[str, float]] = {
     "government_registry": (AssignmentType.REGISTERED, 0.9),
     "regulator": (AssignmentType.REGISTERED, 0.9),
-    "bulk_dataset": (AssignmentType.REGISTERED, 0.85),
+    # A file transport says nothing about what its publisher can authoritatively prove.
+    # Bulk service/archetype columns are observations, never "registered" facts.
+    "bulk_dataset": (AssignmentType.OBSERVED, 0.6),
     "company_website": (AssignmentType.SELF_DESCRIBED, 0.7),
     "industry_association": (AssignmentType.OBSERVED, 0.6),
     "directory": (AssignmentType.OBSERVED, 0.4),  # directories are weak signals (§39.1)
@@ -49,8 +51,14 @@ _CATEGORY_ASSIGNMENT: dict[str, tuple[str, float]] = {
 _DEFAULT_ASSIGNMENT = (AssignmentType.OBSERVED, 0.5)
 
 
-def assignment_type_for_category(source_category: str | None) -> tuple[str, float]:
-    return _CATEGORY_ASSIGNMENT.get(source_category or "", _DEFAULT_ASSIGNMENT)
+def assignment_type_for_category(
+    source_category: str | None, authority_tier: int = 5
+) -> tuple[str, float]:
+    assignment_type, base_confidence = _CATEGORY_ASSIGNMENT.get(
+        source_category or "", _DEFAULT_ASSIGNMENT
+    )
+    authority_factor = max(0.45, 1.0 - 0.08 * (max(1, min(authority_tier, 7)) - 1))
+    return assignment_type, round(base_confidence * authority_factor, 3)
 
 
 def assign(
@@ -134,6 +142,7 @@ def classify_from_observations(
     *,
     pack_id: str,
     source_category: str | None,
+    authority_tier: int = 5,
     known_service_ids: dict[str, str] | None = None,
     known_archetype_ids: dict[str, str] | None = None,
 ) -> list[ClassificationAssignment]:
@@ -142,7 +151,9 @@ def classify_from_observations(
     `known_*_ids` map valid pack category ids to display labels; claims outside the
     pack vocabulary are ignored rather than guessed (§40 abstain-over-fabricate).
     """
-    assignment_type, confidence = assignment_type_for_category(source_category)
+    assignment_type, confidence = assignment_type_for_category(
+        source_category, authority_tier
+    )
     results = []
     for observation in observations:
         value = observation.object_value

@@ -12,7 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from heatseeker_intelligence import confidence as confidence_module
-from heatseeker_intelligence.capabilities import capabilities_for
+from heatseeker_intelligence.capabilities import capabilities_for, refresh_status
 from heatseeker_intelligence.classifications import classifications_for
 from heatseeker_intelligence.facts import NON_ASSERTION_PREDICATES, assertions_for
 from heatseeker_intelligence.gaps import open_questions
@@ -74,6 +74,8 @@ def assemble(session: Session, organisation_id: str) -> dict:
         from heatseeker_intelligence import facts as facts_module
 
         facts_module.reconcile_all(session, canonical.id)
+    for capability in capabilities_for(session, group_ids):
+        refresh_status(capability)
     from heatseeker_intelligence import gaps, sizing
 
     sizing.estimate_sizes(session, canonical.id)
@@ -198,7 +200,11 @@ def refresh(session: Session, organisation_id: str) -> None:
     from heatseeker_intelligence import facts as facts_module
     from heatseeker_intelligence import gaps, sizing
 
-    canonical = merge_group(session, organisation_id)[0]
+    group = merge_group(session, organisation_id)
+    canonical = group[0]
+    group_ids = [organisation.id for organisation in group]
     facts_module.reconcile_all(session, canonical.id)
+    for capability in capabilities_for(session, group_ids):
+        refresh_status(capability)
     sizing.estimate_sizes(session, canonical.id)
     gaps.generate_for(session, canonical.id)

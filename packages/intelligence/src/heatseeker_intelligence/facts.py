@@ -9,8 +9,8 @@ from collections import defaultdict
 
 from heatseeker_common.timeutil import utc_now
 from heatseeker_entity_resolution.resolution import merge_group
-from heatseeker_source_registry.models import SourceDefinition, SourceDocument
-from sqlalchemy import select
+from heatseeker_source_registry.models import SourceDefinition, SourceDocument, SourceRelationship
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from heatseeker_intelligence import confidence as conf
@@ -20,6 +20,14 @@ from heatseeker_intelligence.observations import observations_for, value_key
 # Contested share of observations at which a fact is flagged conflicted (§17.6).
 CONFLICT_RATIO = 1 / 3
 NON_ASSERTION_PREDICATES = {"service_claim", "archetype_claim"}
+DEPENDENT_SOURCE_RELATIONSHIPS = {
+    "copied_from",
+    "derived_from",
+    "mirror_of",
+    "owned_by",
+    "same_owner_as",
+    "syndicates_from",
+}
 
 
 def _document_sources(
@@ -32,6 +40,46 @@ def _document_sources(
         .where(SourceDocument.id.in_(document_ids))
     ).all()
     return {document.id: (document, source) for document, source in rows}
+
+
+def _independence_keys(session: Session, source_ids: set[str]) -> dict[str, str]:
+    """Collapse known copied/owned/syndicated sources into one corroboration origin."""
+
+    parent = {source_id: source_id for source_id in source_ids}
+
+    def find(value: str) -> str:
+        parent.setdefault(value, value)
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+
+    def union(left: str, right: str) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[max(left_root, right_root)] = min(left_root, right_root)
+
+    if source_ids:
+        relationships = session.scalars(
+            select(SourceRelationship).where(
+                or_(
+                    SourceRelationship.source_definition_id.in_(source_ids),
+                    SourceRelationship.related_source_definition_id.in_(source_ids),
+                ),
+                SourceRelationship.relationship_type.in_(DEPENDENT_SOURCE_RELATIONSHIPS),
+                SourceRelationship.confidence >= 0.5,
+                or_(
+                    SourceRelationship.valid_to.is_(None),
+                    SourceRelationship.valid_to >= utc_now(),
+                ),
+            )
+        ).all()
+        for relationship in relationships:
+            union(
+                relationship.source_definition_id,
+                relationship.related_source_definition_id,
+            )
+    return {source_id: find(source_id) for source_id in source_ids}
 
 
 def reconcile(
@@ -72,6 +120,9 @@ def reconcile(
     # Group by canonical value. Authority leads; independent corroboration can strengthen
     # it but cannot let a pile of weak directories outvote a primary registry.
     sources_by_document = _document_sources(session, observations)
+    independence_keys = _independence_keys(
+        session, {source.id for _document, source in sources_by_document.values()}
+    )
     groups: dict[str, list[Observation]] = defaultdict(list)
     for observation in observations:
         groups[value_key(observation.object_value)].append(observation)
@@ -89,7 +140,12 @@ def reconcile(
             ),
             default=0.0,
         )
-        authority_with_corroboration = best_authority * conf.corroboration_score(len(sources))
+        independent_origins = {
+            independence_keys.get(source.id, source.id) for source in sources
+        }
+        authority_with_corroboration = best_authority * conf.corroboration_score(
+            len(independent_origins)
+        )
         extraction = max(o.extraction_confidence for o in items)
         newest = max(o.observed_at for o in items)
         return (authority_with_corroboration, extraction, len(sources), newest)
@@ -99,12 +155,18 @@ def reconcile(
     contradicting = [o for key, items in groups.items() if key != winning_key for o in items]
 
     supporting_sources = {
-        sources_by_document[o.source_document_id][1].id
+        independence_keys.get(
+            sources_by_document[o.source_document_id][1].id,
+            sources_by_document[o.source_document_id][1].id,
+        )
         for o in supporting
         if o.source_document_id in sources_by_document
     }
     contradicting_sources = {
-        sources_by_document[o.source_document_id][1].id
+        independence_keys.get(
+            sources_by_document[o.source_document_id][1].id,
+            sources_by_document[o.source_document_id][1].id,
+        )
         for o in contradicting
         if o.source_document_id in sources_by_document
     }

@@ -10,7 +10,11 @@ from heatseeker_intelligence import confidence as conf
 from heatseeker_intelligence import facts
 from heatseeker_intelligence.models import ExtractionMethod, FactStatus
 from heatseeker_intelligence.observations import record_observation
-from heatseeker_source_registry.models import SourceDefinition, SourceDocument
+from heatseeker_source_registry.models import (
+    SourceDefinition,
+    SourceDocument,
+    SourceRelationship,
+)
 
 
 def make_source(session, name, *, category="company_website", tier=4) -> SourceDefinition:
@@ -110,6 +114,36 @@ def test_corroboration_across_independent_sources(engine):
         email = facts.reconcile(session, org.id, "email")
         assert email.independent_source_count == 1
         assert email.corroboration_score == 1.0
+
+
+def test_copied_sources_do_not_create_false_corroboration(engine):
+    with session_scope(engine) as session:
+        org = entities.create_organisation(session, "Copied Signal Co")
+        original_source = make_source(session, "Original directory", category="directory")
+        mirror_source = make_source(session, "Directory mirror", category="directory")
+        session.add(
+            SourceRelationship(
+                source_definition_id=mirror_source.id,
+                related_source_definition_id=original_source.id,
+                relationship_type="copied_from",
+                confidence=0.95,
+            )
+        )
+        for document in (
+            make_document(session, original_source, "listing"),
+            make_document(session, mirror_source, "listing-copy"),
+        ):
+            record_observation(
+                session,
+                document,
+                "phone",
+                "+61 7 3333 9999",
+                subject_entity_id=org.id,
+            )
+
+        assertion = facts.reconcile(session, org.id, "phone")
+        assert assertion.independent_source_count == 1
+        assert assertion.corroboration_score == 1.0
 
 
 def test_contradiction_is_preserved_and_flagged(engine):

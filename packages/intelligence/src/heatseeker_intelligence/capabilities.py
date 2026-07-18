@@ -17,6 +17,7 @@ from heatseeker_intelligence.models import CapabilityAssignment, CapabilityStatu
 CAPABILITY_RULE_VERSION = "capability/0.1"
 
 _SELF_CATEGORIES = {"company_website"}
+_HYPOTHESIS_ONLY_CATEGORIES = {"directory", "job_board", "news", "weak_signal"}
 HISTORICAL_AFTER_DAYS = 3 * 365.0
 
 
@@ -30,6 +31,7 @@ def record_capability_evidence(
     observation_id: str,
     source_definition_id: str,
     source_category: str | None,
+    authority_tier: int = 3,
     observed_at: datetime,
     contradicts: bool = False,
     geographic_scope: dict | None = None,
@@ -60,6 +62,10 @@ def record_capability_evidence(
         "observed_at": observed_at.isoformat(),
         "contradicts": contradicts,
         "self_described": (source_category or "") in _SELF_CATEGORIES,
+        "hypothesis_only": (
+            (source_category or "") in _HYPOTHESIS_ONLY_CATEGORIES
+            or authority_tier >= 5
+        ),
     }
     ledger = [e for e in assignment.evidence_ids if e.get("observation_id") != observation_id]
     ledger.append(entry)
@@ -96,7 +102,9 @@ def refresh_status(assignment: CapabilityAssignment, now: datetime | None = None
     supporting = [e for e in ledger if not e.get("contradicts")]
     contradicting = [e for e in ledger if e.get("contradicts")]
     independent = {
-        e["source_definition_id"] for e in supporting if not e.get("self_described")
+        e["source_definition_id"]
+        for e in supporting
+        if not e.get("self_described") and not e.get("hypothesis_only")
     }
     newest = None
     for entry in supporting:
@@ -114,6 +122,8 @@ def refresh_status(assignment: CapabilityAssignment, now: datetime | None = None
         status = CapabilityStatus.REPEATEDLY_EVIDENCED
     elif independent:
         status = CapabilityStatus.EVIDENCED
+    elif supporting and all(e.get("hypothesis_only") for e in supporting):
+        status = CapabilityStatus.UNCERTAIN
     else:
         status = CapabilityStatus.CLAIMED  # self-description only (§39.2)
 

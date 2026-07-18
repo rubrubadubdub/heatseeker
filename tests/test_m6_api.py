@@ -4,19 +4,24 @@ from fastapi.testclient import TestClient
 from heatseeker_api.main import create_app
 from heatseeker_common.db import session_scope
 from heatseeker_entity_resolution import entities
+from test_intelligence_facts import make_document, make_source
 
 
 def _seed_orgs(engine):
+    """Three organisations plus two real evidence documents (edges above 0.5
+    confidence require provable evidence references since the M6 hardening)."""
     with session_scope(engine) as session:
         orgs = [
             entities.create_organisation(session, name)
             for name in ("Acme Scaffolding", "BigBuild", "SteelCo")
         ]
-        return [o.id for o in orgs]
+        source = make_source(session, "Graph API evidence")
+        documents = [make_document(session, source, f"doc-{i}").id for i in range(2)]
+        return [o.id for o in orgs], documents
 
 
 def test_project_workspace_roundtrip(engine, settings):
-    acme_id, big_id, _steel_id = _seed_orgs(engine)
+    (acme_id, big_id, _steel_id), (doc_a, doc_b) = _seed_orgs(engine)
     client = TestClient(create_app(settings))
 
     created = client.post(
@@ -27,14 +32,22 @@ def test_project_workspace_roundtrip(engine, settings):
     assert created.status_code == 201
     project_id = created.json()["id"]
 
-    pairs = ((acme_id, "scaffold_contractor"), (big_id, "principal_contractor"))
-    for organisation_id, role in pairs:
+    pairs = ((acme_id, "scaffold_contractor", doc_a), (big_id, "principal_contractor", doc_b))
+    for organisation_id, role, evidence in pairs:
         added = client.post(
             f"/api/projects/{project_id}/participants",
             json={"organisation_id": organisation_id, "role_type": role,
-                  "status": "confirmed", "confidence": 0.8},
+                  "status": "confirmed", "confidence": 0.8, "evidence_ids": [evidence]},
         )
         assert added.status_code == 200
+
+    # Confirmed participation without evidence is refused (hardening rule).
+    bare = client.post(
+        f"/api/projects/{project_id}/participants",
+        json={"organisation_id": acme_id, "role_type": "bidder",
+              "status": "confirmed", "confidence": 0.8},
+    )
+    assert bare.status_code == 422
 
     detail = client.get(f"/api/projects/{project_id}").json()
     assert {p["role_type"] for p in detail["participants"]} == {
@@ -53,23 +66,33 @@ def test_project_workspace_roundtrip(engine, settings):
 
 
 def test_relationships_and_graph_queries(engine, settings):
-    acme_id, big_id, steel_id = _seed_orgs(engine)
+    (acme_id, big_id, steel_id), (doc_a, doc_b) = _seed_orgs(engine)
     client = TestClient(create_app(settings))
 
     project = client.post("/api/projects", json={"name": "Stadium Stage 2"}).json()
-    pairs = ((acme_id, "scaffold_contractor"), (big_id, "principal_contractor"))
-    for organisation_id, role in pairs:
+    pairs = ((acme_id, "scaffold_contractor", doc_a), (big_id, "principal_contractor", doc_b))
+    for organisation_id, role, evidence in pairs:
         client.post(
             f"/api/projects/{project['id']}/participants",
-            json={"organisation_id": organisation_id, "role_type": role, "confidence": 0.8},
+            json={"organisation_id": organisation_id, "role_type": role,
+                  "status": "probable", "confidence": 0.8, "evidence_ids": [evidence]},
         )
     edge = client.post(
         "/api/relationships",
         json={"subject_entity_id": big_id, "object_entity_id": steel_id,
-              "relationship_type": "customer_of", "confidence": 0.6},
+              "relationship_type": "customer_of", "confidence": 0.6,
+              "evidence_ids": [doc_a]},
     )
     assert edge.status_code == 201
     edge_id = edge.json()["id"]
+
+    # Confidence above 0.5 without evidence is refused (hardening rule).
+    overconfident = client.post(
+        "/api/relationships",
+        json={"subject_entity_id": acme_id, "object_entity_id": steel_id,
+              "relationship_type": "partner_of", "confidence": 0.9},
+    )
+    assert overconfident.status_code == 422
 
     self_edge = client.post(
         "/api/relationships",
@@ -107,13 +130,14 @@ def test_relationships_and_graph_queries(engine, settings):
 
 
 def test_entity_page_relationship_form_and_network_explorer(engine, settings):
-    acme_id, big_id, _steel_id = _seed_orgs(engine)
+    (acme_id, big_id, _steel_id), _documents = _seed_orgs(engine)
     client = TestClient(create_app(settings))
 
+    # Evidence-free form entry is allowed up to the 0.5 hypothesis ceiling.
     response = client.post(
         "/relationships/create",
         data={"subject_entity_id": acme_id, "object_entity_id": big_id,
-              "relationship_type": "supplier_to", "confidence": "0.7"},
+              "relationship_type": "supplier_to", "confidence": "0.5"},
         follow_redirects=False,
     )
     assert response.status_code == 303

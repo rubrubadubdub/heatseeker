@@ -106,6 +106,7 @@ def test_capability_ladder(engine):
                 observation_id=observation.id,
                 source_definition_id=source.id,
                 source_category=source.source_category,
+                authority_tier=source.authority_tier,
                 observed_at=utc_now(),
                 contradicts=contradicts,
             )
