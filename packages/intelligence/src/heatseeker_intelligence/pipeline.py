@@ -7,9 +7,12 @@ pipeline to keep it moving. Nothing here bypasses policy gates: collection stays
 the existing autopilot/robots machinery, and nothing auto-merges.
 """
 
+from datetime import datetime, timedelta
+
 from heatseeker_common import jobs
 from heatseeker_common.models import Job, PriorityClass
 from heatseeker_common.settings import Settings
+from heatseeker_common.timeutil import utc_now
 from heatseeker_entity_resolution.matching import scan_for_duplicates
 from heatseeker_entity_resolution.models import Organisation, OrganisationStatus
 from heatseeker_entity_resolution.resolution import canonical_id
@@ -22,8 +25,14 @@ from heatseeker_source_registry.models import DocumentProcessingRun, SourceDocum
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from heatseeker_intelligence import profile
-from heatseeker_intelligence.models import FactAssertion, Observation
+from heatseeker_intelligence import confidence, profile
+from heatseeker_intelligence.capabilities import HISTORICAL_AFTER_DAYS
+from heatseeker_intelligence.models import (
+    CapabilityAssignment,
+    CapabilityStatus,
+    FactAssertion,
+    Observation,
+)
 
 PIPELINE_VERSION = "pipeline/0.1"
 
@@ -93,6 +102,41 @@ def _refresh_stale_entities(session: Session, limit: int) -> int:
             stale_canonicals.setdefault(canonical, None)
         if len(stale_canonicals) >= limit:
             break
+    if len(stale_canonicals) < limit:
+        assertions = session.scalars(select(FactAssertion).order_by(FactAssertion.updated_at)).all()
+        for assertion in assertions:
+            current_freshness = confidence.freshness_score(
+                assertion.predicate, assertion.last_observed_at
+            )
+            if abs(current_freshness - assertion.freshness_score) < 0.01:
+                continue
+            stale_canonicals.setdefault(
+                canonical_id(session, assertion.subject_entity_id), None
+            )
+            if len(stale_canonicals) >= limit:
+                break
+    if len(stale_canonicals) < limit:
+        historical_cutoff = utc_now() - timedelta(days=HISTORICAL_AFTER_DAYS)
+        ageing_capabilities = session.scalars(
+            select(CapabilityAssignment).where(
+                CapabilityAssignment.capability_status.not_in(
+                    [CapabilityStatus.VERIFIED, CapabilityStatus.HISTORICAL]
+                )
+            )
+        ).all()
+        for capability in ageing_capabilities:
+            observed_times = [
+                datetime.fromisoformat(entry["observed_at"])
+                for entry in capability.evidence_ids or []
+                if isinstance(entry, dict) and entry.get("observed_at")
+            ]
+            if observed_times and max(observed_times) >= historical_cutoff:
+                continue
+            stale_canonicals.setdefault(
+                canonical_id(session, capability.organisation_id), None
+            )
+            if len(stale_canonicals) >= limit:
+                break
     for organisation_id in stale_canonicals:
         profile.refresh(session, organisation_id)
     return len(stale_canonicals)
@@ -130,5 +174,40 @@ def advance(
         summary["match_scan"] = None
 
     summary["entities_refreshed"] = _refresh_stale_entities(session, max_entities)
+    summary["lead_rescores_queued"] = _queue_lead_rescores(session, actor)
     session.flush()
     return summary
+
+
+def _queue_lead_rescores(session: Session, actor: str) -> int:
+    """Queue a rescore per active offering (idempotent; skips already-queued ones).
+
+    Imported lazily: lead intelligence sits above this package in the layer stack,
+    and the pipeline must keep working if M8 tables aren't migrated yet.
+    """
+    try:
+        from heatseeker_lead_intelligence.models import Offering, OfferingStatus
+    except ImportError:  # pragma: no cover — package always present in the workspace
+        return 0
+    queued = 0
+    offerings = session.execute(
+        select(Offering.id).where(Offering.status == OfferingStatus.ACTIVE)
+    ).scalars()
+    for offering_id in offerings:
+        pending = session.scalars(
+            select(Job.id).where(
+                Job.job_type == "leads.rescore",
+                Job.status.in_(["queued", "running"]),
+                Job.payload["offering_id"].as_string() == offering_id,
+            )
+        ).first()
+        if pending is None:
+            jobs.enqueue(
+                session,
+                "leads.rescore",
+                payload={"offering_id": offering_id},
+                priority=PriorityClass.BACKGROUND_ENRICHMENT,
+                actor=actor,
+            )
+            queued += 1
+    return queued

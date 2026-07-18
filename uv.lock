@@ -14,6 +14,7 @@ members = [
     "heatseeker-industry-packs",
     "heatseeker-intelligence",
     "heatseeker-knowledge-graph",
+    "heatseeker-lead-intelligence",
     "heatseeker-source-registry",
     "heatseeker-worker",
 ]
@@ -205,6 +206,7 @@ dependencies = [
     { name = "heatseeker-industry-packs" },
     { name = "heatseeker-intelligence" },
     { name = "heatseeker-knowledge-graph" },
+    { name = "heatseeker-lead-intelligence" },
     { name = "heatseeker-source-registry" },
     { name = "heatseeker-worker" },
 ]
@@ -227,6 +229,7 @@ requires-dist = [
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },
     { name = "heatseeker-intelligence", editable = "packages/intelligence" },
     { name = "heatseeker-knowledge-graph", editable = "packages/knowledge_graph" },
+    { name = "heatseeker-lead-intelligence", editable = "packages/lead_intelligence" },
     { name = "heatseeker-source-registry", editable = "packages/source_registry" },
     { name = "heatseeker-worker", editable = "applications/worker" },
 ]
@@ -268,6 +271,7 @@ dependencies = [
     { name = "heatseeker-industry-packs" },
     { name = "heatseeker-intelligence" },
     { name = "heatseeker-knowledge-graph" },
+    { name = "heatseeker-lead-intelligence" },
     { name = "heatseeker-source-registry" },
     { name = "jinja2" },
     { name = "python-multipart" },
@@ -284,6 +288,7 @@ requires-dist = [
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },
     { name = "heatseeker-intelligence", editable = "packages/intelligence" },
     { name = "heatseeker-knowledge-graph", editable = "packages/knowledge_graph" },
+    { name = "heatseeker-lead-intelligence", editable = "packages/lead_intelligence" },
     { name = "heatseeker-source-registry", editable = "packages/source_registry" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "python-multipart", specifier = ">=0.0.9" },
@@ -408,6 +413,31 @@ requires-dist = [
 ]
 
 [[package]]
+name = "heatseeker-lead-intelligence"
+version = "0.1.0"
+source = { editable = "packages/lead_intelligence" }
+dependencies = [
+    { name = "heatseeker-common" },
+    { name = "heatseeker-core-domain" },
+    { name = "heatseeker-entity-resolution" },
+    { name = "heatseeker-intelligence" },
+    { name = "heatseeker-knowledge-graph" },
+    { name = "heatseeker-source-registry" },
+    { name = "openpyxl" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "heatseeker-common", editable = "packages/common" },
+    { name = "heatseeker-core-domain", editable = "packages/core_domain" },
+    { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
+    { name = "heatseeker-intelligence", editable = "packages/intelligence" },
+    { name = "heatseeker-knowledge-graph", editable = "packages/knowledge_graph" },
+    { name = "heatseeker-source-registry", editable = "packages/source_registry" },
+    { name = "openpyxl", specifier = ">=3.1" },
+]
+
+[[package]]
 name = "heatseeker-source-registry"
 version = "0.2.0"
 source = { editable = "packages/source_registry" }
@@ -452,6 +482,7 @@ dependencies = [
     { name = "heatseeker-entity-resolution" },
     { name = "heatseeker-industry-packs" },
     { name = "heatseeker-intelligence" },
+    { name = "heatseeker-lead-intelligence" },
     { name = "heatseeker-source-registry" },
 ]
 
@@ -462,6 +493,7 @@ requires-dist = [
     { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },
     { name = "heatseeker-intelligence", editable = "packages/intelligence" },
+    { name = "heatseeker-lead-intelligence", editable = "packages/lead_intelligence" },
     { name = "heatseeker-source-registry", editable = "packages/source_registry" },
 ]
 
