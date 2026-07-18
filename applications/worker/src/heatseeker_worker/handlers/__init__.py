@@ -6,6 +6,7 @@ from heatseeker_worker.handlers import (  # noqa: F401
     documents,
     entities,
     leads,
+    profiles,
     source_scout,
     sources,
 )

@@ -177,6 +177,9 @@ class IdName(StrictModel):
     id: str
     name: str
     description: str | None = None
+    # Alternate spellings/brands used in the wild — consumed by deterministic page
+    # extraction so vocabulary matching stays pack-configurable, never hard-coded.
+    synonyms: list[str] = Field(default_factory=list)
 
     _id_ok = field_validator("id")(_check_id)
 

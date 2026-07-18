@@ -1,16 +1,16 @@
 # Scaffold/access systems and product families (spec §8.4, §13.8). Configurable seeds.
 schema: products_systems/v1
 systems:
-  - {id: ringlock, name: Ringlock / rosette modular systems}
-  - {id: cuplock, name: Cuplock systems}
-  - {id: kwikstage, name: Kwikstage systems}
-  - {id: tube_and_fitting, name: Tube and fitting}
+  - {id: ringlock, name: Ringlock / rosette modular systems, synonyms: [Ringlock, Ring lock, rosette scaffold, Layher Allround]}
+  - {id: cuplock, name: Cuplock systems, synonyms: [Cuplock, Cuplok, cup lock]}
+  - {id: kwikstage, name: Kwikstage systems, synonyms: [Kwikstage, Kwik Stage, Kwik-Stage, Quickstage, Quick Stage]}
+  - {id: tube_and_fitting, name: Tube and fitting, synonyms: [tube & fitting, tube and clamp, tube & clamp]}
   - {id: frame_scaffold, name: Frame scaffold}
   - {id: aluminium_systems, name: Aluminium systems / mobile towers}
   - {id: modular_stairs, name: Modular stair systems}
   - {id: shoring_systems, name: Shoring / propping systems}
   - {id: temporary_roof, name: Proprietary temporary roof systems}
   - {id: mast_climbers, name: Mast climbers}
-  - {id: suspended_access, name: Suspended access / swing stages}
+  - {id: suspended_access, name: Suspended access / swing stages, synonyms: [swing stage, swing stages, suspended scaffold]}
   - {id: bespoke_structural_access, name: Bespoke structural access}
   - {id: edge_protection_systems, name: Edge-protection systems}

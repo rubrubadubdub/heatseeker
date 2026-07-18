@@ -158,12 +158,16 @@ def score_organisation(
     # --- need likelihood (§19.3 — absence of a gap capability is a hypothesis) ----
     need = 0.5
     if offering.need_gap_capability_ids:
+        # A need-gap capability counts as present even when only CLAIMED: a company
+        # advertising "in-house design" on its own site is telling us not to pitch
+        # design outsourcing, regardless of independent corroboration (§19.3/§19.4).
         gaps_present = [
             capability_by_id[cap_id]
             for cap_id in offering.need_gap_capability_ids
             if cap_id in capability_by_id
             and capability_by_id[cap_id].capability_status
             in (
+                CapabilityStatus.CLAIMED,
                 CapabilityStatus.EVIDENCED,
                 CapabilityStatus.REPEATEDLY_EVIDENCED,
                 CapabilityStatus.VERIFIED,

@@ -112,7 +112,7 @@ improve workflows.
 |---|---|---|
 | Structured API adapters (ABR/ASIC/NZBN keys, params, pagination) | Official registries are the backbone of company facts; plain GET only reaches their homepages | M5 follow-up / M7 |
 | Bulk import beyond CSV (XLSX/Parquet/ZIP, spec §12.2 — CSV landed in M5) | Some official extracts ship as XLSX/Parquet | when a real dataset needs it |
-| Parser-driven service/archetype claims from crawled pages (CSV pack-mapped claims land in M5) | Profile enrichment directly from company websites still needs deterministic page parsing or M11 AI extraction | M7 parsers / M11 |
+| ~~Parser-driven claims from crawled pages~~ **Landed 2026-07-18**: deterministic website profile fetch (`company_profiles.py` + `page_extraction.py`) — robots-honoured per-org fetch; rule-based contacts/addresses/branch/system/service extraction with pack synonyms; `profiles.fetch` job auto-queued by `pipeline.advance` | §41.19 — quality results with AI disabled | Done (extend rules as needed) |
 | Pack-configurable tier thresholds (v1 rubric is deterministic code constants) | §16.4 says naming and thresholds stay configurable | M8 (lead rules land in packs) |
 | RSS/Atom per-entry parsing (feeds stored as one XML doc today) | News/story clustering needs per-article documents | M7 (or earlier) |
 | Autopilot-scheduled crawls (crawls are on-demand) | Needs a cadence policy to avoid 21 sites × every tick | short follow-up |

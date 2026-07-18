@@ -174,9 +174,49 @@ def advance(
         summary["match_scan"] = None
 
     summary["entities_refreshed"] = _refresh_stale_entities(session, max_entities)
+    summary["profile_fetches_queued"] = _queue_profile_fetches(session, actor)
     summary["lead_rescores_queued"] = _queue_lead_rescores(session, actor)
     session.flush()
     return summary
+
+
+def _queue_profile_fetches(session: Session, actor: str, limit: int = 25) -> int:
+    """Queue deterministic website profile fetches for organisations that have a
+    domain but no public contact route yet — the AI-free enrichment loop (§41.19)."""
+    from heatseeker_entity_resolution.models import ContactPoint, OrganisationDomain
+
+    with_domain = select(OrganisationDomain.organisation_id).distinct()
+    with_contact = select(ContactPoint.organisation_id).distinct()
+    candidates = session.scalars(
+        select(Organisation.id)
+        .where(
+            Organisation.status != OrganisationStatus.MERGED,
+            Organisation.id.in_(with_domain),
+            Organisation.id.not_in(with_contact),
+        )
+        .limit(limit * 3)
+    ).all()
+    queued = 0
+    for organisation_id in candidates:
+        if queued >= limit:
+            break
+        pending = session.scalars(
+            select(Job.id).where(
+                Job.job_type == "profiles.fetch",
+                Job.status.in_(["queued", "running", "succeeded"]),
+                Job.payload["organisation_id"].as_string() == organisation_id,
+            )
+        ).first()
+        if pending is None:
+            jobs.enqueue(
+                session,
+                "profiles.fetch",
+                payload={"organisation_id": organisation_id},
+                priority=PriorityClass.BACKGROUND_ENRICHMENT,
+                actor=actor,
+            )
+            queued += 1
+    return queued
 
 
 def _queue_lead_rescores(session: Session, actor: str) -> int:
