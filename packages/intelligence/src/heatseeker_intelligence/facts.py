@@ -19,7 +19,12 @@ from heatseeker_intelligence.observations import observations_for, value_key
 
 # Contested share of observations at which a fact is flagged conflicted (§17.6).
 CONFLICT_RATIO = 1 / 3
-NON_ASSERTION_PREDICATES = {"service_claim", "archetype_claim", "social_profile"}
+NON_ASSERTION_PREDICATES = {
+    "service_claim",
+    "archetype_claim",
+    "social_profile",
+    "source_record",
+}
 DEPENDENT_SOURCE_RELATIONSHIPS = {
     "copied_from",
     "derived_from",
@@ -82,9 +87,7 @@ def _independence_keys(session: Session, source_ids: set[str]) -> dict[str, str]
     return {source_id: find(source_id) for source_id in source_ids}
 
 
-def reconcile(
-    session: Session, organisation_id: str, predicate: str
-) -> FactAssertion | None:
+def reconcile(session: Session, organisation_id: str, predicate: str) -> FactAssertion | None:
     """Recompute the assertion for one (entity, predicate) from the whole merge group."""
     group_ids = [o.id for o in merge_group(session, organisation_id)]
     canonical_id = group_ids[0]
@@ -140,9 +143,7 @@ def reconcile(
             ),
             default=0.0,
         )
-        independent_origins = {
-            independence_keys.get(source.id, source.id) for source in sources
-        }
+        independent_origins = {independence_keys.get(source.id, source.id) for source in sources}
         authority_with_corroboration = best_authority * conf.corroboration_score(
             len(independent_origins)
         )
@@ -192,15 +193,15 @@ def reconcile(
         match=0.95 if human_verified else 0.85,
         freshness=conf.freshness_score(predicate, newest),
         corroboration=conf.corroboration_score(len(supporting_sources)),
-        contradiction=conf.contradiction_score(
-            len(supporting_sources), len(contradicting_sources)
-        ),
+        contradiction=conf.contradiction_score(len(supporting_sources), len(contradicting_sources)),
     )
     final = breakdown.final
 
     source_total = len(supporting_sources) + len(contradicting_sources)
-    contested = bool(contradicting_sources) and source_total > 0 and (
-        len(contradicting_sources) / source_total >= CONFLICT_RATIO
+    contested = (
+        bool(contradicting_sources)
+        and source_total > 0
+        and (len(contradicting_sources) / source_total >= CONFLICT_RATIO)
     )
     stale = breakdown.freshness < conf.STALE_THRESHOLD
     if contested:

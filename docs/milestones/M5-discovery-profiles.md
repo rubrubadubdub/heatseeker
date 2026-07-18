@@ -132,6 +132,10 @@ directories cannot outvote a primary authority, while preserving the disagreemen
   TikTok, X, Threads, Pinterest, and Reddit communities import as normalised,
   evidence-linked, multi-valued contact identities. The generic social column supports
   mixed URLs, while platform columns also accept handles.
+- Every structured row may carry a platform-neutral source-record URL and label. Company
+  profiles enumerate all contributing evidence documents and their exact Google,
+  directory, social, registry, website, or otherwise-unanticipated record URLs; these
+  are provenance links and never treated as outreach routes.
 - Exact shared public-profile URLs strengthen the same M4 resolution queue used by
   registers, domains, phones, addresses, and names. They are never deterministic merge
   keys: a profile by itself remains human review, preserving the ability to assemble

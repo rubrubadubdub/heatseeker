@@ -9,6 +9,7 @@ from heatseeker_common.db import session_scope
 from heatseeker_common.models import Job
 from heatseeker_entity_resolution import entities
 from heatseeker_intelligence import discovery
+from heatseeker_intelligence import profile as intelligence_profile
 from heatseeker_intelligence.models import (
     AssignmentType,
     BulkImportRun,
@@ -86,9 +87,7 @@ def test_mapping_spec_validation():
     assert discovery._row_geo_codes(
         geography_mapping, {"Name": "A", "State": "New South Wales"}
     ) == ["AU-NSW"]
-    assert discovery._row_geo_codes(
-        geography_mapping, {"Name": "B", "State": "not-a-region"}
-    ) == []
+    assert discovery._row_geo_codes(geography_mapping, {"Name": "B", "State": "not-a-region"}) == []
 
 
 def test_import_creates_population_with_full_provenance(engine, settings):
@@ -123,8 +122,11 @@ def test_import_creates_population_with_full_provenance(engine, settings):
             ).scalars()
         )
         assert {o.predicate for o in observations} >= {
-            "canonical_name", "registration_identifier", "website_domain",
-            "location", "employee_count_band",
+            "canonical_name",
+            "registration_identifier",
+            "website_domain",
+            "location",
+            "employee_count_band",
         }
         assert all(o.source_location["row"] >= 2 for o in observations)
 
@@ -144,9 +146,7 @@ def test_import_creates_population_with_full_provenance(engine, settings):
         assert sizes["legal_entity_size"] == "20-49"
 
         # Dedupe funnel queued.
-        job_types = {
-            j.job_type for j in session.execute(select(Job)).scalars()
-        }
+        job_types = {j.job_type for j in session.execute(select(Job)).scalars()}
         assert "entities.match_scan" in job_types
 
 
@@ -180,10 +180,7 @@ def test_single_csv_zip_import_preserves_archive_and_rejects_ambiguity(engine, s
 
 
 def test_jsonl_import_removes_csv_conversion_bottleneck(engine, settings):
-    content = (
-        b'{"company":"Structured Co","abn":12345678901,"state":"QLD"}\n'
-        b'"not an object"\n'
-    )
+    content = b'{"company":"Structured Co","abn":12345678901,"state":"QLD"}\n"not an object"\n'
     mapping = discovery.MappingSpec(
         columns={"name": "company", "identifier": "abn", "region": "state"},
         constants={"identifier_scheme": "abn", "country": "AU"},
@@ -364,8 +361,7 @@ def test_import_populates_pack_classifications_and_capabilities(engine, settings
             "hire",
         }
         assert all(
-            assignment.assignment_type == AssignmentType.OBSERVED
-            and assignment.confidence < 0.5
+            assignment.assignment_type == AssignmentType.OBSERVED and assignment.confidence < 0.5
             for assignment in assignments
         )
         assert all(
@@ -377,12 +373,10 @@ def test_import_populates_pack_classifications_and_capabilities(engine, settings
         organisation_id = assignments[0].entity_id
         assembled = profile.assemble(session, organisation_id)
         assert all(
-            assembled["classification_evidence"].get(assignment.id)
-            for assignment in assignments
+            assembled["classification_evidence"].get(assignment.id) for assignment in assignments
         )
         assert all(
-            assembled["capability_evidence"].get(capability.id)
-            for capability in capabilities
+            assembled["capability_evidence"].get(capability.id) for capability in capabilities
         )
         assert not list(
             session.execute(
@@ -454,13 +448,11 @@ def test_import_uses_dataset_coverage_date_for_freshness(engine, settings):
         discovery.execute_import(session, settings, run.id, content)
         observations = list(session.scalars(select(Observation)).all())
         assert observations
-        assert all(
-            row.observed_at == datetime(2000, 1, 2, tzinfo=UTC) for row in observations
-        )
+        assert all(row.observed_at == datetime(2000, 1, 2, tzinfo=UTC) for row in observations)
         assertions = list(session.scalars(select(FactAssertion)).all())
         assert assertions
         assert all(row.status == FactStatus.STALE for row in assertions)
-        assert run.transformation_version == "import/0.4"
+        assert run.transformation_version == "import/0.5"
 
     with session_scope(engine) as session, pytest.raises(ValueError, match="coverage_date"):
         discovery.create_import_run(
@@ -665,12 +657,11 @@ def test_contact_columns_become_typed_contact_points(engine, settings):
     # Re-import (new bytes, same companies): contacts dedupe instead of duplicating.
     refreshed = CONTACT_CSV + b"Extra Co,22 222 222 222,QLD,Brisbane,4000,,,\n"
     with session_scope(engine) as session:
-        _run_import(
-            session, settings, content=refreshed, mapping=CONTACT_MAPPING, name="refresh"
-        )
+        _run_import(session, settings, content=refreshed, mapping=CONTACT_MAPPING, name="refresh")
     with session_scope(engine) as session:
         acme = next(
-            o for o in entities.list_organisations(session)
+            o
+            for o in entities.list_organisations(session)
             if o.canonical_name == "Acme Scaffolding Pty Ltd"
         )
         emails = [c for c in acme.contact_points if c.contact_type == "general_email"]
@@ -755,29 +746,52 @@ def test_social_directory_and_website_evidence_assemble_one_company(engine, sett
             "locality": "Town",
             "phone": "Phone",
             "instagram": "Instagram",
+            "facebook": "Facebook",
             "domain": "Web",
             "street_address": "Street",
+            "source_record_url": "SourceURL",
+            "source_label": "SourceLabel",
         },
         constants={"country": "AU"},
     )
     datasets = [
         (
-            b"Name,Town,Phone,Instagram,Web,Street\n"
-            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,Acme.Scaffold,,\n",
+            b"Name,Town,Phone,Instagram,Facebook,Web,Street,SourceURL,SourceLabel\n"
+            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,Acme.Scaffold,,,,"
+            b"https://instagram.com/acme.scaffold,Instagram\n",
             "Instagram discovery",
             "Instagram public profile",
             6,
         ),
         (
-            b"Name,Town,Phone,Instagram,Web,Street\n"
-            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,,acme.com.au,\n",
+            b"Name,Town,Phone,Instagram,Facebook,Web,Street,SourceURL,SourceLabel\n"
+            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,,,acme.com.au,,"
+            b"https://www.yellowpages.com.au/qld/brisbane/acme-scaffolding-1,Yellow Pages\n",
             "Yellow Pages discovery",
             "Yellow Pages Australia",
             5,
         ),
         (
-            b"Name,Town,Phone,Instagram,Web,Street\n"
-            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,,acme.com.au,12 Gantry Rd\n",
+            b"Name,Town,Phone,Instagram,Facebook,Web,Street,SourceURL,SourceLabel\n"
+            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,,,,,"
+            b"https://www.google.com/maps/place/Acme+Scaffolding,Google Business Profile\n",
+            "Google discovery",
+            "Google Business Profile",
+            6,
+        ),
+        (
+            b"Name,Town,Phone,Instagram,Facebook,Web,Street,SourceURL,SourceLabel\n"
+            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,,"
+            b"https://facebook.com/acmescaffold,,,"
+            b"https://facebook.com/acmescaffold,Facebook\n",
+            "Facebook discovery",
+            "Facebook public page",
+            6,
+        ),
+        (
+            b"Name,Town,Phone,Instagram,Facebook,Web,Street,SourceURL,SourceLabel\n"
+            b"Acme Scaffolding,Brisbane,+61 7 3333 1111,,,acme.com.au,12 Gantry Rd,"
+            b"https://acme.com.au/contact,Company website\n",
             "Company website discovery",
             "Acme company website",
             3,
@@ -801,10 +815,8 @@ def test_social_directory_and_website_evidence_assemble_one_company(engine, sett
             "Acme Scaffolding"
         ]
         acme = organisations[0]
-        phone = next(
-            contact for contact in acme.contact_points if contact.contact_type == "phone"
-        )
-        assert len(phone.source_evidence_ids) == 3
+        phone = next(contact for contact in acme.contact_points if contact.contact_type == "phone")
+        assert len(phone.source_evidence_ids) == 5
         assert any(
             contact.contact_type == "social_profile"
             and contact.value == "https://instagram.com/acme.scaffold"
@@ -820,4 +832,31 @@ def test_social_directory_and_website_evidence_assemble_one_company(engine, sett
                 .where(Observation.subject_entity_id == acme.id)
             )
         )
-        assert len(evidence_source_ids) == 3
+        assert len(evidence_source_ids) == 5
+
+        assembled = intelligence_profile.assemble(session, acme.id)
+        assert len(assembled["evidence_sources"]) == 5
+        record_urls = {
+            url for source in assembled["evidence_sources"] for url in source["record_urls"]
+        }
+        assert record_urls >= {
+            "https://instagram.com/acme.scaffold",
+            "https://www.google.com/maps/place/Acme+Scaffolding",
+            "https://www.yellowpages.com.au/qld/brisbane/acme-scaffolding-1",
+            "https://facebook.com/acmescaffold",
+            "https://acme.com.au/contact",
+        }
+
+
+def test_invalid_source_record_url_is_preserved_as_rejected_evidence(engine, settings):
+    content = b"Name,SourceURL\nAcme,https://user:secret@example.com/acme\n"
+    mapping = discovery.MappingSpec(columns={"name": "Name", "source_record_url": "SourceURL"})
+    with session_scope(engine) as session:
+        _run_import(session, settings, content=content, mapping=mapping, name="bad URL")
+
+    with session_scope(engine) as session:
+        observation = session.scalars(
+            select(Observation).where(Observation.predicate == "source_record")
+        ).one()
+        assert observation.normalisation_status == NormalisationStatus.REJECTED
+        assert observation.object_value["url"] == "https://user:secret@example.com/acme"

@@ -34,14 +34,17 @@ def test_profile_api_exposes_evidence_confidence_gaps(engine, settings):
     assert identifier_fact["confidence"] > 0
     assert identifier_fact["confidence_vocabulary"] in ("high", "moderate", "low")
     assert set(identifier_fact["components"]) == {
-        "authority", "extraction", "match", "freshness", "corroboration", "contradiction",
+        "authority",
+        "extraction",
+        "match",
+        "freshness",
+        "corroboration",
+        "contradiction",
     }
     assert identifier_fact["best_evidence_document_id"]  # evidence viewer target
     # Missing stays missing: nothing invented for phone/email.
     assert "phone" not in facts
-    assert any(
-        q["question_type"] == "missing_contact" for q in profile["research_questions"]
-    )
+    assert any(q["question_type"] == "missing_contact" for q in profile["research_questions"])
     sizes = {e["concept"]: e["band"] for e in profile["size_estimates"]}
     assert sizes["legal_entity_size"] == "20-49"
     assert sizes["local_branch_size"] == "unresolved"
@@ -59,6 +62,7 @@ def test_ui_discovery_page_and_import_form(engine, settings):
     assert page.status_code == 200
     assert "bulk dataset import" in page.text.lower()
     assert "Instagram profile column" in page.text
+    assert "Any source/listing record URL column" in page.text
     assert "profiles remain weak evidence" in page.text
 
     response = client.post(
@@ -113,16 +117,18 @@ def test_public_profile_contacts_expose_direct_evidence(engine, settings):
     instagram = next(
         contact
         for contact in profile["contact_points"]
-        if contact["contact_type"] == "social_profile"
-        and contact["label"] == "instagram"
+        if contact["contact_type"] == "social_profile" and contact["label"] == "instagram"
     )
     assert instagram["value"] == "https://instagram.com/acme.scaffold"
     assert instagram["confidence"] == 0.45
     assert len(instagram["source_evidence_ids"]) == 1
     assert len(instagram["evidence_document_ids"]) == 1
+    assert len(profile["evidence_sources"]) == 1
+    assert "https://instagram.com/acme.scaffold" in profile["evidence_sources"][0]["record_urls"]
 
     page = client.get(f"/entities/{acme['id']}")
     assert "https://instagram.com/acme.scaffold" in page.text
+    assert "Contributing sources" in page.text
     assert f"/evidence/{instagram['evidence_document_ids'][0]}" in page.text
 
 
@@ -141,17 +147,13 @@ def test_ui_entity_profile_sections_and_gap_actions(engine, settings):
 
     profile = client.get(f"/api/companies/{acme['id']}/profile").json()
     question_id = profile["research_questions"][0]["id"]
-    done = client.post(
-        f"/research-questions/{question_id}/resolved", follow_redirects=False
-    )
+    done = client.post(f"/research-questions/{question_id}/resolved", follow_redirects=False)
     assert done.status_code == 303
     refreshed = client.get(f"/api/companies/{acme['id']}/profile").json()
     assert question_id not in [q["id"] for q in refreshed["research_questions"]]
 
 
-def test_manual_observation_requires_explicit_verification_and_links_evidence(
-    engine, settings
-):
+def test_manual_observation_requires_explicit_verification_and_links_evidence(engine, settings):
     _import_dataset(engine, settings)
     client = TestClient(create_app(settings))
     acme = next(

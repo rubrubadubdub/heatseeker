@@ -40,6 +40,8 @@ _COLUMN_FIELDS = (
     ("tiktok", "TikTok business-profile column", False),
     ("x_profile", "X/Twitter profile column", False),
     ("social_profile", "Other supported social-profile column", False),
+    ("source_record_url", "Any source/listing record URL column", False),
+    ("source_label", "Source/listing label column", False),
     ("service_claim", "Service ID column (optional, pack vocabulary)", False),
     ("archetype_claim", "Archetype ID column (optional, pack vocabulary)", False),
 )
@@ -94,6 +96,8 @@ async def discovery_import(
     col_tiktok: Annotated[str, Form()] = "",
     col_x_profile: Annotated[str, Form()] = "",
     col_social_profile: Annotated[str, Form()] = "",
+    col_source_record_url: Annotated[str, Form()] = "",
+    col_source_label: Annotated[str, Form()] = "",
     col_service_claim: Annotated[str, Form()] = "",
     col_archetype_claim: Annotated[str, Form()] = "",
 ):
@@ -128,6 +132,8 @@ async def discovery_import(
             ("tiktok", col_tiktok),
             ("x_profile", col_x_profile),
             ("social_profile", col_social_profile),
+            ("source_record_url", col_source_record_url),
+            ("source_label", col_source_label),
             ("service_claim", col_service_claim),
             ("archetype_claim", col_archetype_claim),
         )

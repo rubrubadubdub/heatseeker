@@ -137,8 +137,11 @@ def api_entity_profile(request: Request, organisation_id: str):
             "canonical": _org_summary(profile["canonical"]),
             "group": [_org_summary(o) for o in profile["group"]],
             "identifiers": [
-                {"origin_id": row["origin"].id, "scheme": row["item"].scheme,
-                 "value": row["item"].value}
+                {
+                    "origin_id": row["origin"].id,
+                    "scheme": row["item"].scheme,
+                    "value": row["item"].value,
+                }
                 for row in profile["identifiers"]
             ],
             "domains": [
@@ -146,13 +149,19 @@ def api_entity_profile(request: Request, organisation_id: str):
                 for row in profile["domains"]
             ],
             "contact_points": [
-                {"origin_id": row["origin"].id, "contact_type": row["item"].contact_type,
-                 "value": row["item"].value}
+                {
+                    "origin_id": row["origin"].id,
+                    "contact_type": row["item"].contact_type,
+                    "value": row["item"].value,
+                }
                 for row in profile["contact_points"]
             ],
             "units": [
-                {"origin_id": row["origin"].id, "unit_type": row["item"].unit_type,
-                 "name": row["item"].name}
+                {
+                    "origin_id": row["origin"].id,
+                    "unit_type": row["item"].unit_type,
+                    "name": row["item"].name,
+                }
                 for row in profile["units"]
             ],
         }
@@ -184,9 +193,7 @@ def api_merge(request: Request, organisation_id: str, payload: MergeRequest):
 def api_reverse_merge(request: Request, merge_id: str, payload: ReverseRequest):
     try:
         with session_scope(request.app.state.engine) as session:
-            merge = reverse_merge(
-                session, merge_id, reason=payload.reason, performed_by="api"
-            )
+            merge = reverse_merge(session, merge_id, reason=payload.reason, performed_by="api")
             return {
                 "merge_id": merge.id,
                 "reversed_at": merge.reversed_at.isoformat(),
@@ -285,9 +292,7 @@ def api_company_profile(request: Request, organisation_id: str):
                         else None
                     ),
                     "last_observed_at": (
-                        fact["last_observed_at"].isoformat()
-                        if fact["last_observed_at"]
-                        else None
+                        fact["last_observed_at"].isoformat() if fact["last_observed_at"] else None
                     ),
                 }
                 for fact in assembled["facts"]
@@ -303,12 +308,25 @@ def api_company_profile(request: Request, organisation_id: str):
                     "source_evidence_ids": list(row["item"].source_evidence_ids),
                     "evidence_document_ids": [
                         document.id
-                        for document in assembled["contact_evidence"].get(
-                            row["item"].id, []
-                        )
+                        for document in assembled["contact_evidence"].get(row["item"].id, [])
                     ],
                 }
                 for row in assembled["identity"]["contact_points"]
+            ],
+            "evidence_sources": [
+                {
+                    "source_name": source["source_name"],
+                    "source_document_id": source["document"].id,
+                    "source_url": source["source_url"],
+                    "record_urls": source["record_urls"],
+                    "labels": source["labels"],
+                    "predicates": source["predicates"],
+                    "observation_ids": source["observation_ids"],
+                    "observation_count": source["observation_count"],
+                    "max_extraction_confidence": source["max_extraction_confidence"],
+                    "last_observed_at": source["last_observed_at"].isoformat(),
+                }
+                for source in assembled["evidence_sources"]
             ],
             "classifications": [
                 {
@@ -334,8 +352,7 @@ def api_company_profile(request: Request, organisation_id: str):
                     "evidence_strength": c.evidence_strength,
                     "evidence_count": len(c.evidence_ids),
                     "evidence_document_ids": [
-                        document.id
-                        for document in assembled["capability_evidence"].get(c.id, [])
+                        document.id for document in assembled["capability_evidence"].get(c.id, [])
                     ],
                 }
                 for c in assembled["capabilities"]

@@ -38,7 +38,9 @@ identity/authority handling (`/discovery`), and the merge-safe profile workspace
 `/entities/{id}`. Public social profiles and directory listings are cross-source discovery
 evidence rather than lead silos: stable public profile identities can strengthen M4
 matching, never exact-merge alone, and linked profiles are proposed manual-only without
-stored platform passwords. **M6 projects, relationships & graph is done**
+stored platform passwords. Any imported public record may retain an exact source URL and
+label, and profiles enumerate all contributing documents regardless of channel. **M6
+projects, relationships & graph is done**
 (`heatseeker_knowledge_graph`, migration 0017): projects + typed participation,
 directed evidence-backed relationships (end keeps dates, retract keeps the row),
 derived co-participation edges, bounded multi-hop queries with per-hop confidence,

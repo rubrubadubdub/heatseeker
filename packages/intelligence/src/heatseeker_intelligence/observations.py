@@ -28,6 +28,7 @@ PREDICATE_LOCATION = "location"
 PREDICATE_EMPLOYEES = "employee_count_band"
 PREDICATE_DESCRIPTION = "description"
 PREDICATE_SOCIAL_PROFILE = "social_profile"
+PREDICATE_SOURCE_RECORD = "source_record"
 PREDICATE_SERVICE_CLAIM = "service_claim"
 PREDICATE_ARCHETYPE_CLAIM = "archetype_claim"
 

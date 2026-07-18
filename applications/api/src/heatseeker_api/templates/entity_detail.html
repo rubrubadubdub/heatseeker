@@ -114,6 +114,26 @@
       </tbody>
     </table>
 
+    <h2 class="h6">Contributing sources</h2>
+    <p class="small text-secondary">Independent records are retained separately and
+      assembled through shared company identifiers, domains, phones, addresses, and names.</p>
+    <table class="table table-sm align-middle">
+      <thead><tr><th>source</th><th>record/profile URLs</th><th>observations</th><th>evidence</th></tr></thead>
+      <tbody>
+      {% for source in intel.evidence_sources %}
+        <tr>
+          <td class="small">{{ source.source_name }}{% if source.labels %}<br><span class="text-secondary">{{ source.labels | join(', ') }}</span>{% endif %}</td>
+          <td class="small">
+            {% for url in source.record_urls %}<div><a href="{{ url }}" rel="noopener noreferrer">{{ url }}</a></div>
+            {% else %}<span class="text-secondary">stored dataset/document</span>{% endfor %}
+          </td>
+          <td class="small">{{ source.observation_count }} · {{ source.predicates | join(', ') }}</td>
+          <td class="small"><a href="/evidence/{{ source.document.id }}">view</a></td>
+        </tr>
+      {% else %}<tr><td colspan="4" class="small text-secondary">none recorded</td></tr>{% endfor %}
+      </tbody>
+    </table>
+
     <h2 class="h6">Contact points</h2>
     <table class="table table-sm">
       <thead><tr><th>type</th><th>value</th><th>flags</th><th>confidence</th><th>evidence</th><th>origin record</th></tr></thead>

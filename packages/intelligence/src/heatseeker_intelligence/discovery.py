@@ -42,6 +42,7 @@ from heatseeker_entity_resolution.normalise import (
 )
 from heatseeker_entity_resolution.resolution import canonical_id
 from heatseeker_industry_packs.loader import default_packs_root, discover_packs, load_pack
+from heatseeker_source_registry.identity import canonicalise_url
 from heatseeker_source_registry.models import (
     RobotsStatus,
     SourceDefinition,
@@ -73,10 +74,11 @@ from heatseeker_intelligence.observations import (
     PREDICATE_REGISTRATION_STATUS,
     PREDICATE_SERVICE_CLAIM,
     PREDICATE_SOCIAL_PROFILE,
+    PREDICATE_SOURCE_RECORD,
     record_observation,
 )
 
-TRANSFORMATION_VERSION = "import/0.4"
+TRANSFORMATION_VERSION = "import/0.5"
 _MAX_REJECTED_SAMPLES = 20
 
 # Mapping fields → observation predicates handled by the importer. "columns" maps a
@@ -106,6 +108,8 @@ MAPPABLE_FIELDS = (
     "pinterest",
     "reddit",
     "social_profile",
+    "source_record_url",
+    "source_label",
     "service_claim",
     "archetype_claim",
     "pack_id",
@@ -254,9 +258,7 @@ def _bulk_source(
     publisher_name = (publisher or "").strip()
     source_identity = f"{publisher_name}: {dataset_name}" if publisher_name else dataset_name
     name = f"Bulk dataset: {source_identity}"[:300]
-    source = session.scalars(
-        select(SourceDefinition).where(SourceDefinition.name == name)
-    ).first()
+    source = session.scalars(select(SourceDefinition).where(SourceDefinition.name == name)).first()
     if source is not None:
         if source.authority_tier != authority_tier:
             raise ValueError(
@@ -377,9 +379,7 @@ def _scope_snapshot(session: Session) -> dict | None:
     }
 
 
-def _in_scope(
-    scope: dict | None, mapping: MappingSpec, row: dict, *, pack_id: str | None
-) -> bool:
+def _in_scope(scope: dict | None, mapping: MappingSpec, row: dict, *, pack_id: str | None) -> bool:
     if scope is None:
         return True
     include_unknown = bool(scope.get("include_unknown"))
@@ -388,8 +388,10 @@ def _in_scope(
     excluded_geography = list(scope.get("exclude_codes") or [])
     if requested_geography or excluded_geography:
         codes = _row_geo_codes(mapping, row)
-        if codes and excluded_geography and match_geography(
-            codes, excluded_geography, mode=GeographyMatchMode.OVERLAPS
+        if (
+            codes
+            and excluded_geography
+            and match_geography(codes, excluded_geography, mode=GeographyMatchMode.OVERLAPS)
         ):
             return False
         if requested_geography and not match_geography(
@@ -459,12 +461,16 @@ def _find_organisation(
         key = (scheme, normalise_identifier(identifier))
         if index is not None and key in index.identifiers:
             return index.identifiers[key]
-        match = session.execute(
-            select(OrganisationIdentifier).where(
-                OrganisationIdentifier.scheme == scheme,
-                OrganisationIdentifier.value_normalised == normalise_identifier(identifier),
+        match = (
+            session.execute(
+                select(OrganisationIdentifier).where(
+                    OrganisationIdentifier.scheme == scheme,
+                    OrganisationIdentifier.value_normalised == normalise_identifier(identifier),
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if match is not None:
             return session.get(Organisation, canonical_id(session, match.organisation_id))
     # A name is not a deterministic identity. Require matching non-empty geography;
@@ -496,6 +502,13 @@ def _split_claims(raw: str | None) -> list[str]:
     if not raw:
         return []
     return sorted({part.strip() for part in re.split(r"[|;,]", raw) if part.strip()})
+
+
+def _split_urls(raw: str | None) -> list[str]:
+    """Split URL lists without treating legal URL punctuation as a delimiter."""
+    if not raw:
+        return []
+    return list(dict.fromkeys(part.strip() for part in re.split(r"[|\r\n]+", raw) if part.strip()))
 
 
 def _pack_vocabulary(
@@ -568,8 +581,7 @@ def _dataset_payload(settings: Settings, content: bytes, filename: str) -> tuple
         candidates = [
             info
             for info in archive.infolist()
-            if not info.is_dir()
-            and info.filename.lower().endswith((".csv", ".json", ".jsonl"))
+            if not info.is_dir() and info.filename.lower().endswith((".csv", ".json", ".jsonl"))
         ]
         if len(candidates) != 1:
             raise ValueError("ZIP import must contain exactly one CSV, JSON, or JSONL file")
@@ -578,8 +590,7 @@ def _dataset_payload(settings: Settings, content: bytes, filename: str) -> tuple
             raise ValueError("encrypted ZIP members are not supported")
         if member.file_size > settings.evidence_upload_max_bytes:
             raise ValueError(
-                f"dataset in ZIP exceeds {settings.evidence_upload_max_bytes} "
-                "uncompressed bytes"
+                f"dataset in ZIP exceeds {settings.evidence_upload_max_bytes} uncompressed bytes"
             )
         return archive.read(member), member.filename
 
@@ -732,8 +743,10 @@ def _import_row(
                 location_type=LocationType.REGISTERED_ADDRESS,
             )
             entities.set_primary_location(session, organisation, location)
-        elif street_address and organisation.primary_location is not None and not (
-            organisation.primary_location.address_lines or []
+        elif (
+            street_address
+            and organisation.primary_location is not None
+            and not (organisation.primary_location.address_lines or [])
         ):
             organisation.primary_location.address_lines = [street_address]
 
@@ -782,7 +795,7 @@ def _import_row(
             )
     seen_social_profiles: set[str] = set()
     for field_name, expected_platform in _SOCIAL_MAPPING_FIELDS.items():
-        for raw_profile in _split_claims(mapping.value(row, field_name)):
+        for raw_profile in _split_urls(mapping.value(row, field_name)):
             try:
                 profile = normalise_social_profile_url(
                     raw_profile, expected_platform=expected_platform
@@ -812,6 +825,23 @@ def _import_row(
                 confidence=0.45,
                 source_evidence_ids=[observation.id],
             )
+    source_label = mapping.value(row, "source_label")
+    for raw_url in _split_urls(mapping.value(row, "source_record_url")):
+        try:
+            source_record_url = canonicalise_url(raw_url)
+        except ValueError:
+            observe(
+                PREDICATE_SOURCE_RECORD,
+                {"url": raw_url, "label": source_label},
+                confidence=0.0,
+                normalisation_status=NormalisationStatus.REJECTED,
+            )
+            continue
+        observe(
+            PREDICATE_SOURCE_RECORD,
+            {"url": source_record_url, "label": source_label},
+            confidence=0.65,
+        )
     employees = mapping.value(row, "employees_band")
     if employees:
         valid_employee_band = employees in sizing.EMPLOYEE_BANDS
@@ -918,9 +948,7 @@ def execute_import(
         if not isinstance(row, dict):
             counts["rejected"] += 1
             if len(rejected_samples) < _MAX_REJECTED_SAMPLES:
-                rejected_samples.append(
-                    {"row": row_number, "reason": "row is not an object"}
-                )
+                rejected_samples.append({"row": row_number, "reason": "row is not an object"})
             continue
         outcome = _import_row(
             session,
@@ -938,9 +966,7 @@ def execute_import(
         if outcome.rejected_reason:
             counts["rejected"] += 1
             if len(rejected_samples) < _MAX_REJECTED_SAMPLES:
-                rejected_samples.append(
-                    {"row": row_number, "reason": outcome.rejected_reason}
-                )
+                rejected_samples.append({"row": row_number, "reason": outcome.rejected_reason})
         elif outcome.out_of_scope:
             counts["out_of_scope"] += 1
         else:

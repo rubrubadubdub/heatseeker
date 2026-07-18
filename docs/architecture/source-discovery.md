@@ -74,6 +74,13 @@ X/TikTok profile, directory listing, Maps result, official register row, and com
 website each remain an independent observation with their own source-document lineage.
 They can all point at the same candidate organisation.
 
+The import boundary is also platform-neutral. A row may carry an exact
+`source_record_url` and optional `source_label` for any public record—Google Business,
+Yellow Pages, a niche directory, social profile, registry result, marketplace, or a
+source type not anticipated by the current pack. Those record URLs are provenance, not
+contact routes or truth claims. The assembled company profile lists every contributing
+source document, exact record URL, predicates contributed, and observation count.
+
 Public social URLs are normalised to stable account identities and stored as
 multi-valued, evidence-linked contact points. Exact shared profile URLs participate in
 the M4 match queue alongside stronger identifiers: registration ID, website domain,
@@ -81,6 +88,12 @@ phone, exact address, and corroborated name/location. A social profile alone can
 produce a review candidate; it never causes an exact or silent merge. Personal LinkedIn
 profiles, generic platform homepages, login/share routes, and content-only URLs without
 a stable account identity are rejected.
+
+Cross-source assembly is evidence-led: a company first found on Instagram may later gain
+Google, Yellow Pages, Facebook, registry, and first-party website observations. Exact
+name/place can attach an unambiguous record; shared phones, domains, addresses, social
+identities, and registration IDs strengthen duplicate candidates. Ambiguous records stay
+separate in the human resolution queue. Source channel never defines company identity.
 
 When an already permitted company or association page links to a recognisable public
 profile, the crawler proposes that exact profile URL at authority tier 6 with a

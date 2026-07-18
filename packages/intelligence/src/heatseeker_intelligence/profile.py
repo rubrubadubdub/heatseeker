@@ -17,6 +17,10 @@ from heatseeker_intelligence.classifications import classifications_for
 from heatseeker_intelligence.facts import NON_ASSERTION_PREDICATES, assertions_for
 from heatseeker_intelligence.gaps import open_questions
 from heatseeker_intelligence.models import FactStatus, Observation
+from heatseeker_intelligence.observations import (
+    PREDICATE_SOCIAL_PROFILE,
+    PREDICATE_SOURCE_RECORD,
+)
 from heatseeker_intelligence.sizing import estimates_for
 
 
@@ -53,8 +57,7 @@ def _facts_are_current(session: Session, canonical_id: str, group_ids: list[str]
     return all(
         assertion.rule_version == confidence_module.RULE_VERSION
         and (
-            set(assertion.supporting_observation_ids)
-            | set(assertion.contradicting_observation_ids)
+            set(assertion.supporting_observation_ids) | set(assertion.contradicting_observation_ids)
         )
         == expected[assertion.predicate]
         for assertion in assertions
@@ -86,31 +89,18 @@ def assemble(session: Session, organisation_id: str) -> dict:
     capability_rows = capabilities_for(session, group_ids)
     size_rows = estimates_for(session, group_ids)
     contact_rows = identity["contact_points"]
-    evidence_observation_ids = {
-        observation_id
-        for assignment in classification_rows
-        for observation_id in assignment.evidence_ids
-    }
-    evidence_observation_ids.update(
-        entry.get("observation_id")
-        for capability in capability_rows
-        for entry in capability.evidence_ids
-        if isinstance(entry, dict) and entry.get("observation_id")
+    profile_observations = list(
+        session.scalars(
+            select(Observation)
+            .where(
+                Observation.subject_entity_id.in_(group_ids),
+                Observation.normalisation_status != "rejected",
+            )
+            .order_by(Observation.observed_at, Observation.id)
+        )
     )
-    evidence_observation_ids.update(
-        observation_id
-        for row in contact_rows
-        for observation_id in row["item"].source_evidence_ids
-    )
-    evidence_observations = {
-        observation.id: observation
-        for observation in session.execute(
-            select(Observation).where(Observation.id.in_(evidence_observation_ids))
-        ).scalars()
-    }
-    document_ids = {
-        a.best_evidence_document_id for a in assertions if a.best_evidence_document_id
-    }
+    evidence_observations = {observation.id: observation for observation in profile_observations}
+    document_ids = {a.best_evidence_document_id for a in assertions if a.best_evidence_document_id}
     document_ids.update(
         observation.source_document_id for observation in evidence_observations.values()
     )
@@ -120,6 +110,48 @@ def assemble(session: Session, organisation_id: str) -> dict:
             select(SourceDocument).where(SourceDocument.id.in_(document_ids))
         ).scalars()
     }
+
+    observations_by_document: dict[str, list[Observation]] = {}
+    for observation in profile_observations:
+        observations_by_document.setdefault(observation.source_document_id, []).append(observation)
+    evidence_sources = []
+    for document_id, source_observations in observations_by_document.items():
+        document = documents[document_id]
+        record_urls: set[str] = set()
+        labels: set[str] = set()
+        for observation in source_observations:
+            if observation.predicate not in {
+                PREDICATE_SOCIAL_PROFILE,
+                PREDICATE_SOURCE_RECORD,
+            }:
+                continue
+            value = observation.object_value
+            if not isinstance(value, dict):
+                continue
+            if value.get("url"):
+                record_urls.add(str(value["url"]))
+            label = value.get("label") or value.get("platform")
+            if label:
+                labels.add(str(label))
+        if not record_urls and document.source_url.startswith(("http://", "https://")):
+            record_urls.add(document.source_url)
+        evidence_sources.append(
+            {
+                "document": document,
+                "source_name": document.source_definition.name,
+                "source_url": document.source_url,
+                "record_urls": sorted(record_urls),
+                "labels": sorted(labels),
+                "predicates": sorted({row.predicate for row in source_observations}),
+                "observation_ids": [row.id for row in source_observations],
+                "observation_count": len(source_observations),
+                "max_extraction_confidence": max(
+                    row.extraction_confidence for row in source_observations
+                ),
+                "last_observed_at": max(row.observed_at for row in source_observations),
+            }
+        )
+    evidence_sources.sort(key=lambda row: (row["source_name"].casefold(), row["source_url"]))
 
     facts = [
         {
@@ -202,6 +234,7 @@ def assemble(session: Session, organisation_id: str) -> dict:
         "capabilities": capability_rows,
         "capability_evidence": capability_evidence,
         "contact_evidence": contact_evidence,
+        "evidence_sources": evidence_sources,
         "contradicted_capabilities": [
             c for c in capability_rows if c.capability_status == "contradicted"
         ],
