@@ -6,6 +6,7 @@ from heatseeker_common.settings import Settings
 from heatseeker_entity_resolution.models import *  # noqa: F403 — register entity tables
 from heatseeker_industry_packs.models import *  # noqa: F403 — register pack tables
 from heatseeker_intelligence.models import *  # noqa: F403 — register intelligence tables
+from heatseeker_knowledge_graph.models import *  # noqa: F403 — register graph tables
 from heatseeker_source_registry.models import *  # noqa: F403 — register source tables
 from sqlalchemy import engine_from_config, pool
 

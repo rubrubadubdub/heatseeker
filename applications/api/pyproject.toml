@@ -10,6 +10,7 @@ dependencies = [
     "heatseeker-core-domain",
     "heatseeker-entity-resolution",
     "heatseeker-intelligence",
+    "heatseeker-knowledge-graph",
     "heatseeker-ai",
     "fastapi>=0.111",
     "uvicorn>=0.30",
@@ -31,4 +32,5 @@ heatseeker-source-registry = { workspace = true }
 heatseeker-core-domain = { workspace = true }
 heatseeker-entity-resolution = { workspace = true }
 heatseeker-intelligence = { workspace = true }
+heatseeker-knowledge-graph = { workspace = true }
 heatseeker-ai = { workspace = true }

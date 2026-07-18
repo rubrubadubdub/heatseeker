@@ -13,6 +13,7 @@ members = [
     "heatseeker-entity-resolution",
     "heatseeker-industry-packs",
     "heatseeker-intelligence",
+    "heatseeker-knowledge-graph",
     "heatseeker-source-registry",
     "heatseeker-worker",
 ]
@@ -203,6 +204,7 @@ dependencies = [
     { name = "heatseeker-entity-resolution" },
     { name = "heatseeker-industry-packs" },
     { name = "heatseeker-intelligence" },
+    { name = "heatseeker-knowledge-graph" },
     { name = "heatseeker-source-registry" },
     { name = "heatseeker-worker" },
 ]
@@ -224,6 +226,7 @@ requires-dist = [
     { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },
     { name = "heatseeker-intelligence", editable = "packages/intelligence" },
+    { name = "heatseeker-knowledge-graph", editable = "packages/knowledge_graph" },
     { name = "heatseeker-source-registry", editable = "packages/source_registry" },
     { name = "heatseeker-worker", editable = "applications/worker" },
 ]
@@ -264,6 +267,7 @@ dependencies = [
     { name = "heatseeker-entity-resolution" },
     { name = "heatseeker-industry-packs" },
     { name = "heatseeker-intelligence" },
+    { name = "heatseeker-knowledge-graph" },
     { name = "heatseeker-source-registry" },
     { name = "jinja2" },
     { name = "python-multipart" },
@@ -279,6 +283,7 @@ requires-dist = [
     { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },
     { name = "heatseeker-intelligence", editable = "packages/intelligence" },
+    { name = "heatseeker-knowledge-graph", editable = "packages/knowledge_graph" },
     { name = "heatseeker-source-registry", editable = "packages/source_registry" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "python-multipart", specifier = ">=0.0.9" },
@@ -385,6 +390,21 @@ requires-dist = [
     { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
     { name = "heatseeker-industry-packs", editable = "packages/industry_packs" },
     { name = "heatseeker-source-registry", editable = "packages/source_registry" },
+]
+
+[[package]]
+name = "heatseeker-knowledge-graph"
+version = "0.1.0"
+source = { editable = "packages/knowledge_graph" }
+dependencies = [
+    { name = "heatseeker-common" },
+    { name = "heatseeker-entity-resolution" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "heatseeker-common", editable = "packages/common" },
+    { name = "heatseeker-entity-resolution", editable = "packages/entity_resolution" },
 ]
 
 [[package]]

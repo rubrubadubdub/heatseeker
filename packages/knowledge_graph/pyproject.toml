@@ -1,0 +1,20 @@
+[project]
+name = "heatseeker-knowledge-graph"
+version = "0.1.0"
+description = "Projects, participation, typed relationships, and relational graph queries (M6)"
+requires-python = ">=3.12"
+dependencies = [
+    "heatseeker-common",
+    "heatseeker-entity-resolution",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/heatseeker_knowledge_graph"]
+
+[tool.uv.sources]
+heatseeker-common = { workspace = true }
+heatseeker-entity-resolution = { workspace = true }
