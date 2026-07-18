@@ -56,6 +56,11 @@ lowers confidence · suppression respected · no automatic outreach.
 10. **Integration**: `leads.rescore` job; `pipeline.advance` rescores active
     offerings after profile refresh; dashboard checklist gains a "Define an offering
     & build the lead queue" step.
+11. **Research-completion admission (ADR-0016)**: a scored company remains stage
+    `researching` until stable identity, official domain, specific location, public
+    contact, description, and evidenced relevance are present. Gap-directed live-web
+    lookup proposes URLs; deterministic HeatSeeker fetch/identity checks admit facts.
+    XLSX contains completed leads only and reports the research backlog count.
 
 ## Acceptance → test map
 

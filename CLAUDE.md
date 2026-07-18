@@ -51,9 +51,12 @@ evidence references). **M8 lead intelligence is done, built before M7 (ADR-0015)
 explained scoring (every §19.2 dimension with evidence-cited reasons, unknowns instead
 of fabricated values), §20.2 contactability, reversible suppression respected in queue
 and exports, `/leads` queue UI + full-detail XLSX export; lead timing is a declared
-neutral stub until M7. A **guided operating layer** wraps it all: dashboard "Next
+neutral stub until M7. **ADR-0016 closes the sparse-lead failure mode**: deterministic
+gap signatures drive verified live-web domain lookup and bounded deep first-party
+research; incomplete accounts stay `researching` and cannot enter the Leads XLSX sheet.
+A **guided operating layer** wraps it all: dashboard "Next
 steps" checklist + one-click `pipeline.advance` job, and orientation intros on dense
-pages — keep new features wired into `guidance.py`. 305 tests green. M7 (news, events,
+pages — keep new features wired into `guidance.py`. 316 tests green. M7 (news, events,
 macro signals) next — replaces the lead timing stub.
 Check [docs/roadmap.md](docs/roadmap.md) for milestone status before starting any work.
 Dev loop: `uv sync` · `uv run pytest -q` · `uv run ruff check .` · `uv run heatseeker run`

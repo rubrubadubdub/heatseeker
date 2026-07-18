@@ -31,3 +31,4 @@ judgement but requires meaningful deviations to be documented — this is where.
 | [0013](0013-configurable-robots-enforcement-and-proxy.md) | Configurable robots enforcement (default enforce) | Accepted |
 | [0014](0014-agentic-source-scout.md) | Bounded agentic Source Scout with explicit unattended mode | Accepted |
 | [0015](0015-lead-intelligence-before-events.md) | Build M8 lead intelligence before M7 events; XLSX export pulled forward | Accepted |
+| [0016](0016-deterministic-lead-research-loop.md) | Deterministic lead research loop with verified web lookup | Accepted |

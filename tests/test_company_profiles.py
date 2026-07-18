@@ -155,3 +155,80 @@ def test_robots_disallow_blocks_page(engine, settings):
         )
         assert summary["pages"] == 0
         assert summary["blocked"] >= 1  # robots honoured — nothing fetched
+
+
+def test_candidate_domain_requires_page_identity_corroboration(engine, settings):
+    exact_page = (
+        "<html><body><h1>Rovera Scaffolding Pty Limited</h1>"
+        "<p>ACN 095 140 819</p><p>Email info@roverascaffolding.com.au</p></body></html>"
+    )
+    wrong_page = (
+        "<html><body><h1>Rovera Scaffolding (QLD) Pty Ltd</h1>"
+        "<p>info@roveraqld.com.au</p></body></html>"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nAllow: /\n")
+        html = exact_page if request.url.host == "roverascaffolding.com.au" else wrong_page
+        return httpx.Response(200, html=html)
+
+    transport = httpx.MockTransport(handler)
+    with session_scope(engine) as session:
+        org = entities.create_organisation(
+            session, "Rovera Scaffolding Pty Limited", identifiers=[("acn", "095140819")]
+        )
+        rejected = verify_and_attach_domain(
+            session, settings, org.id, "https://roveraqld.com.au/", transport=transport
+        )
+        accepted = verify_and_attach_domain(
+            session,
+            settings,
+            org.id,
+            "https://roverascaffolding.com.au/contact",
+            transport=transport,
+        )
+        assert rejected["accepted"] is False
+        assert accepted["accepted"] is True
+        assert [domain.domain for domain in org.domains] == ["roverascaffolding.com.au"]
+        queries = entity_research_queries(org, ("public_contact_route",))
+        assert any("095140819" in query for query in queries)
+        assert any("contact address phone email" in query for query in queries)
+
+
+def test_profile_fetch_follows_targeted_pages_and_records_description(engine, settings):
+    pages = {
+        "/": (
+            "<html><head><meta name='description' content='Acme delivers complex "
+            "commercial and industrial scaffolding throughout Queensland.'></head><body>"
+            "<a href='/about-us'>About</a><a href='/services'>Capabilities</a>"
+            "<a href='/contact'>Contact</a></body></html>"
+        ),
+        "/about-us": "<html><body><p>Acme Scaffolding Pty Ltd</p></body></html>",
+        "/services": "<html><body><p>Scaffold erection and Kwikstage hire.</p></body></html>",
+        "/contact": (
+            "<html><body><form><input name='email'></form>"
+            "<p>12 Gantry Road, Acacia Ridge, QLD 4110</p></body></html>"
+        ),
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nAllow: /\n")
+        return httpx.Response(200, html=pages.get(request.url.path, "missing"))
+
+    with session_scope(engine) as session:
+        org = entities.create_organisation(
+            session,
+            "Acme Scaffolding Pty Ltd",
+            identifiers=[("abn", "51824753556")],
+            domains=["acme.example"],
+        )
+        summary = fetch_and_extract(
+            session, settings, org.id, transport=httpx.MockTransport(handler)
+        )
+        assert summary["pages"] == 4
+        assert org.description.startswith("Acme delivers complex")
+        assert org.legal_name == "Acme Scaffolding Pty Ltd"
+        assert any(contact.contact_type == "contact_form" for contact in org.contact_points)
+        assert org.primary_location.postal_code == "4110"

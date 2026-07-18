@@ -8,6 +8,9 @@ page-level provenance; nothing here fetches or writes.
 
 import re
 from dataclasses import dataclass, field
+from urllib.parse import urljoin, urlsplit
+
+from selectolax.parser import HTMLParser
 
 EXTRACTOR_VERSION = "pages/0.1"
 
@@ -31,6 +34,11 @@ _ADDRESS_RE = re.compile(
     rf"([A-Za-z][A-Za-z\s']{{2,30}}?),?\s+({_STATE})\s*,?\s*(\d{{4}})",
     re.IGNORECASE,
 )
+_IDENTIFIER_RE = re.compile(
+    r"\b(ABN|ACN|NZBN)\s*(?:No\.?\s*)?[:#]?\s*((?:\d[\s.-]?){8,14}\d)\b",
+    re.IGNORECASE,
+)
+_IDENTIFIER_LENGTHS = {"abn": 11, "acn": 9, "nzbn": 13}
 
 # Phrases that indicate the company designs/drafts in-house (§19.3 negative-need signal).
 _INHOUSE_DESIGN_RE = re.compile(
@@ -51,10 +59,18 @@ class PageSignals:
     emails: list[str] = field(default_factory=list)
     phones: list[str] = field(default_factory=list)
     addresses: list[dict] = field(default_factory=list)  # street/locality/state/postcode
+    identifiers: list[tuple[str, str]] = field(default_factory=list)
     service_hits: list[tuple[str, str]] = field(default_factory=list)  # (id, matched text)
     system_hits: list[tuple[str, str]] = field(default_factory=list)
     archetype_hits: list[tuple[str, str]] = field(default_factory=list)
     inhouse_design_phrases: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class PageMetadata:
+    description: str | None = None
+    contact_form_url: str | None = None
+    links: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _dedupe(values):
@@ -104,6 +120,11 @@ def extract_signals(
     signals.phones = _dedupe(
         _normalise_phone(match.group(0)) for match in _PHONE_RE.finditer(text)
     )
+    for match in _IDENTIFIER_RE.finditer(text):
+        scheme = match.group(1).casefold()
+        value = "".join(character for character in match.group(2) if character.isdigit())
+        if len(value) == _IDENTIFIER_LENGTHS[scheme]:
+            signals.identifiers.append((scheme, value))
 
     seen_addresses = set()
     for match in _ADDRESS_RE.finditer(text):
@@ -141,3 +162,36 @@ def extract_signals(
 
 def is_role_email(email: str) -> bool:
     return email.split("@", 1)[0] in _ROLE_LOCAL_PARTS
+
+
+def extract_page_metadata(html: str, page_url: str) -> PageMetadata:
+    """Extract navigation and page-level fields that disappear during text distillation."""
+    tree = HTMLParser(html)
+    description = None
+    for selector in ('meta[name="description"]', 'meta[property="og:description"]'):
+        node = tree.css_first(selector)
+        value = (node.attributes.get("content", "").strip() if node else "")
+        if 30 <= len(value) <= 1000:
+            description = " ".join(value.split())
+            break
+
+    links: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for node in tree.css("a[href]"):
+        absolute = urljoin(page_url, node.attributes.get("href", "")).split("#", 1)[0]
+        parts = urlsplit(absolute)
+        if parts.scheme not in ("http", "https") or not parts.netloc or absolute in seen:
+            continue
+        seen.add(absolute)
+        links.append((absolute, " ".join((node.text() or "").split())[:300]))
+
+    contact_form_url = None
+    if tree.css_first("form") is not None:
+        haystack = f"{urlsplit(page_url).path} {tree.body.text() if tree.body else ''}".casefold()
+        if any(term in haystack for term in ("contact", "enquir", "quote", "estimate")):
+            contact_form_url = page_url
+    return PageMetadata(
+        description=description,
+        contact_form_url=contact_form_url,
+        links=links,
+    )

@@ -9,7 +9,7 @@ in-house design capability evidence. Spec §41.19: quality results with AI disab
 """
 
 import re
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 from heatseeker_common import audit
 from heatseeker_common.settings import Settings
@@ -21,7 +21,12 @@ from heatseeker_entity_resolution.models import (
     Organisation,
     UnitType,
 )
-from heatseeker_entity_resolution.normalise import phone_match_key
+from heatseeker_entity_resolution.normalise import (
+    normalise_domain,
+    normalise_identifier,
+    normalise_name,
+    phone_match_key,
+)
 from heatseeker_source_registry.crawler import RobotsCache
 from heatseeker_source_registry.distill import html_to_text
 from heatseeker_source_registry.fetch import fetch_url
@@ -40,7 +45,10 @@ from heatseeker_intelligence import capabilities, classifications, facts, gaps, 
 from heatseeker_intelligence.discovery import _pack_vocabulary
 from heatseeker_intelligence.models import ExtractionMethod
 from heatseeker_intelligence.observations import (
+    PREDICATE_DOMAIN,
     PREDICATE_EMAIL,
+    PREDICATE_IDENTIFIER,
+    PREDICATE_LEGAL_NAME,
     PREDICATE_LOCATION,
     PREDICATE_PHONE,
     PREDICATE_SERVICE_CLAIM,
@@ -48,17 +56,80 @@ from heatseeker_intelligence.observations import (
 )
 from heatseeker_intelligence.page_extraction import (
     EXTRACTOR_VERSION,
+    extract_page_metadata,
     extract_signals,
     is_role_email,
 )
+from heatseeker_intelligence.research_requirements import assess
 
-PROFILE_FETCH_VERSION = "profile-fetch/0.1"
-_SUBPAGE_HINT = re.compile(
-    r'href=["\']([^"\']*(?:contact|about|location|branch|our-team|services)[^"\']*)["\']',
-    re.IGNORECASE,
+PROFILE_FETCH_VERSION = "profile-fetch/0.2"
+_PAGE_PURPOSES = (
+    ("contact", "contact", "enquir", "quote", "estimate", "get-in-touch"),
+    ("identity", "about", "company", "who-we-are", "privacy", "terms"),
+    ("location", "location", "branch", "office", "yard", "depot"),
+    ("services", "service", "capabilit", "solution", "what-we-do"),
+    ("projects", "project", "portfolio", "case-stud", "our-work"),
+    ("people", "team", "people", "management", "leadership"),
 )
-_MAX_SUBPAGES = 3
+_MAX_PROFILE_PAGES = 12
 _SOURCE_NAME = "Company websites (deterministic profile fetch)"
+
+
+def entity_research_snapshot(organisation: Organisation, missing: tuple[str, ...]) -> dict:
+    location = organisation.primary_location
+    return {
+        "organisation_id": organisation.id,
+        "canonical_name": organisation.canonical_name,
+        "legal_name": organisation.legal_name,
+        "trading_names": list(organisation.trading_names or []),
+        "identifiers": [
+            {"scheme": item.scheme, "value": item.value} for item in organisation.identifiers
+        ],
+        "known_location": (
+            {
+                "locality": location.locality,
+                "region": location.region,
+                "country": location.country,
+                "postcode": location.postal_code,
+            }
+            if location
+            else None
+        ),
+        "known_domains": [item.domain for item in organisation.domains],
+        "missing_required_fields": list(missing),
+    }
+
+
+def entity_research_queries(organisation: Organisation, missing: tuple[str, ...]) -> list[str]:
+    """Stable, inspectable query plan ordered from strongest identity signal outward."""
+    name = organisation.legal_name or organisation.canonical_name
+    quoted = f'"{name}"'
+    queries = [f"{quoted} official website"]
+    queries.extend(f'{quoted} "{item.value}"' for item in organisation.identifiers)
+    location = organisation.primary_location
+    if location and (location.locality or location.region):
+        place = " ".join(part for part in (location.locality, location.region) if part)
+        queries.append(f"{quoted} {place}")
+    if "public_contact_route" in missing or "specific_location" in missing:
+        queries.append(f"{quoted} contact address phone email")
+    if "business_description" in missing or "evidenced_relevance" in missing:
+        queries.append(f"{quoted} services capabilities projects")
+    return list(dict.fromkeys(queries))
+
+
+def _legal_name_on_page(text: str, known_name: str) -> str | None:
+    """Recover a legal suffix only when the page name matches the known entity core."""
+    core = normalise_name(known_name)
+    if not core:
+        return None
+    flexible_core = r"[\s&.,'()/-]+".join(re.escape(token) for token in core.split())
+    match = re.search(
+        rf"\b({flexible_core}[\s,]*(?:Pty\s+(?:Ltd|Limited)|NZ\s+Limited|Limited|Ltd))\b",
+        text,
+        re.IGNORECASE,
+    )
+    candidate = " ".join(match.group(1).split()) if match else None
+    return candidate if candidate and normalise_name(candidate) == core else None
 
 
 def _profile_source(session: Session) -> SourceDefinition:
@@ -125,19 +196,160 @@ def _store_page(
     return document
 
 
-def _subpage_urls(base_url: str, html: str) -> list[str]:
-    host = urlsplit(base_url).netloc
-    found: list[str] = []
-    for match in _SUBPAGE_HINT.finditer(html):
-        absolute = urljoin(base_url, match.group(1))
+def verify_and_attach_domain(
+    session: Session,
+    settings: Settings,
+    organisation_id: str,
+    candidate_url: str,
+    *,
+    transport=None,
+) -> dict:
+    """Fetch an AI/search-proposed first-party page and attach only a proven identity.
+
+    Search output is a lead, never evidence.  Acceptance is deterministic and requires
+    corroborating content on the candidate host: exact legal wording, registration ID,
+    known geography, or a same-domain business email in addition to the company name.
+    """
+    organisation = session.get(Organisation, organisation_id)
+    if organisation is None:
+        raise LookupError(f"organisation not found: {organisation_id}")
+    source = _profile_source(session)
+    enforce = robots_enforced(source, settings)
+    robots = RobotsCache(settings, transport)
+    if enforce and not robots.allowed(candidate_url):
+        return {"accepted": False, "reason": "robots_disallowed", "url": candidate_url}
+    try:
+        result = fetch_url(settings, candidate_url, transport=transport)
+    except Exception as exc:
+        return {"accepted": False, "reason": f"unreachable: {type(exc).__name__}"}
+    if not result.content:
+        return {"accepted": False, "reason": "empty_response", "url": candidate_url}
+
+    final_url = str(result.final_url or candidate_url)
+    host = normalise_domain(final_url)
+    if not host:
+        return {"accepted": False, "reason": "invalid_host", "url": final_url}
+    document = _store_page(
+        session,
+        settings,
+        source,
+        final_url,
+        result.content,
+        result.content_type,
+        str(RobotsStatus.ALLOWED if enforce else RobotsStatus.UNKNOWN),
+        enforce,
+    )
+    text = html_to_text(result.content)
+    name_key = normalise_name(organisation.legal_name or organisation.canonical_name)
+    text_key = normalise_name(text)
+    name_match = bool(name_key and name_key in text_key)
+    score = 0.55 if name_match else 0.0
+    reasons = ["normalised company name appears on page"] if name_match else []
+    strong_identity_signal = False
+
+    compact_text = normalise_identifier(text)
+    identifier_hits = [
+        item.value
+        for item in organisation.identifiers
+        if normalise_identifier(item.value) in compact_text
+    ]
+    if identifier_hits:
+        score += 0.5
+        strong_identity_signal = True
+        reasons.append("registration identifier appears on page")
+
+    raw_folded = " ".join(text.casefold().split())
+    exact_names = [organisation.canonical_name, organisation.legal_name]
+    if any(value and " ".join(value.casefold().split()) in raw_folded for value in exact_names):
+        score += 0.2
+        strong_identity_signal = True
+        reasons.append("exact recorded name appears on page")
+
+    location = organisation.primary_location
+    location_terms = [
+        value.casefold()
+        for value in (
+            location.locality if location else None,
+            location.region if location else None,
+            location.postal_code if location else None,
+        )
+        if value and len(value) >= 3
+    ]
+    if location_terms and any(term in raw_folded for term in location_terms):
+        score += 0.15
+        strong_identity_signal = True
+        reasons.append("known geography appears on page")
+
+    signals = extract_signals(text)
+    if any(normalise_domain(email.split("@", 1)[1]) == host for email in signals.emails):
+        score += 0.15
+        reasons.append("same-domain business email appears on page")
+
+    score = round(min(score, 1.0), 3)
+    if score < 0.7 or not strong_identity_signal:
+        return {
+            "accepted": False,
+            "reason": "identity_threshold_not_met",
+            "score": score,
+            "signals": reasons,
+            "url": final_url,
+        }
+    observation = record_observation(
+        session,
+        document,
+        PREDICATE_DOMAIN,
+        host,
+        subject_entity_id=organisation.id,
+        extraction_method=ExtractionMethod.DETERMINISTIC,
+        extraction_confidence=score,
+        source_location={
+            "url": final_url,
+            "verification_rule": "candidate-domain/0.1",
+            "signals": reasons,
+        },
+    )
+    entities.add_domain(session, organisation, host, is_primary=True)
+    facts.reconcile(session, organisation.id, PREDICATE_DOMAIN)
+    return {
+        "accepted": True,
+        "domain": host,
+        "score": score,
+        "signals": reasons,
+        "observation_id": observation.id,
+        "url": final_url,
+    }
+
+
+def _subpage_urls(base_url: str, html: str, missing: tuple[str, ...] = ()) -> list[str]:
+    """Rank useful internal links by the fields still missing, then by page purpose."""
+    host = (urlsplit(base_url).hostname or "").removeprefix("www.")
+    metadata = extract_page_metadata(html, base_url)
+    wanted = {
+        "official_domain": {"identity"},
+        "stable_identity": {"identity"},
+        "specific_location": {"location", "contact"},
+        "public_contact_route": {"contact", "people"},
+        "business_description": {"identity", "services"},
+        "evidenced_relevance": {"services", "projects"},
+    }
+    priority_purposes = set().union(*(wanted.get(field, set()) for field in missing))
+    ranked: list[tuple[int, int, str]] = []
+    for order, (absolute, anchor) in enumerate(metadata.links):
         parts = urlsplit(absolute)
-        if parts.scheme in ("http", "https") and parts.netloc == host:
-            cleaned = absolute.split("#", 1)[0]
-            if cleaned not in found and cleaned != base_url:
-                found.append(cleaned)
-        if len(found) >= _MAX_SUBPAGES:
-            break
-    return found
+        candidate_host = (parts.hostname or "").removeprefix("www.")
+        if candidate_host != host:
+            continue
+        haystack = f"{parts.path} {anchor}".casefold()
+        purposes = {
+            purpose
+            for purpose, *terms in _PAGE_PURPOSES
+            if any(term in haystack for term in terms)
+        }
+        if not purposes:
+            continue
+        rank = 0 if purposes & priority_purposes else 1
+        ranked.append((rank, order, absolute))
+    return [url for _rank, _order, url in sorted(ranked)]
 
 
 def fetch_and_extract(
@@ -185,9 +397,9 @@ def fetch_and_extract(
     base_url = f"https://{organisation.domains[0].domain}/"
     queue = [base_url]
     fetched: set[str] = set()
-    homepage_html: str | None = None
+    description_recorded = bool(organisation.description)
 
-    while queue and summary["pages"] < 1 + _MAX_SUBPAGES:
+    while queue and summary["pages"] < _MAX_PROFILE_PAGES:
         url = queue.pop(0)
         if url in fetched:
             continue
@@ -212,11 +424,15 @@ def fetch_and_extract(
             result.content, result.content_type, str(robots_state), enforce,
         )
         html = result.content.decode("utf-8", errors="replace")
-        if homepage_html is None:
-            homepage_html = html
-            queue.extend(_subpage_urls(url, html))
+        current_report = assess(session, organisation)
+        queue.extend(
+            candidate
+            for candidate in _subpage_urls(url, html, current_report.missing)
+            if candidate not in fetched and candidate not in queue
+        )
 
         text = html_to_text(result.content)
+        metadata = extract_page_metadata(html, str(result.final_url or url))
         signals = extract_signals(
             text, services=services, systems=systems, archetypes=archetypes
         )
@@ -230,6 +446,22 @@ def fetch_and_extract(
                 extraction_confidence=conf,
                 source_location=prov,
             )
+
+        for scheme, value in signals.identifiers:
+            observe(
+                PREDICATE_IDENTIFIER,
+                {"scheme": scheme, "value": value},
+                conf=0.75,
+            )
+            entities.add_identifier(session, organisation, scheme, value)
+            summary["identifiers"] = summary.get("identifiers", 0) + 1
+        if not organisation.legal_name:
+            legal_name = _legal_name_on_page(text, organisation.canonical_name)
+            if legal_name:
+                observe(PREDICATE_LEGAL_NAME, legal_name, conf=0.75)
+                organisation.legal_name = legal_name
+                entities.refresh_profile_completeness(session, organisation)
+                summary["legal_names"] = summary.get("legal_names", 0) + 1
 
         for email in signals.emails:
             observation = observe(PREDICATE_EMAIL, email)
@@ -250,6 +482,23 @@ def fetch_and_extract(
                 confidence=0.7, source_evidence_ids=[observation.id],
             )
             summary["phones"] += 1
+        if metadata.contact_form_url:
+            observation = observe("contact_form", metadata.contact_form_url, conf=0.7)
+            entities.add_contact_point(
+                session,
+                organisation,
+                ContactType.CONTACT_FORM,
+                metadata.contact_form_url,
+                confidence=0.7,
+                source_evidence_ids=[observation.id],
+            )
+            summary["contact_forms"] = summary.get("contact_forms", 0) + 1
+        if metadata.description and not description_recorded:
+            observation = observe("description", metadata.description, conf=0.7)
+            organisation.description = metadata.description
+            entities.refresh_profile_completeness(session, organisation)
+            description_recorded = True
+            summary["descriptions"] = summary.get("descriptions", 0) + 1
         existing_units = {(unit.name or "").casefold() for unit in organisation.units}
         for index, address in enumerate(signals.addresses):
             observe(PREDICATE_LOCATION, {**address, "country": "AU"}, conf=0.65)
@@ -324,6 +573,13 @@ def fetch_and_extract(
         facts.reconcile_all(session, organisation.id)
         sizing.estimate_sizes(session, organisation.id)
         gaps.generate_for(session, organisation.id)
+    completion = assess(session, organisation)
+    summary["completion"] = {
+        "complete": completion.complete,
+        "score": completion.score,
+        "missing": list(completion.missing),
+        "signature": completion.signature,
+    }
     audit.record(
         session, "profile-fetch", "profile.fetched", "organisation", organisation.id, summary
     )

@@ -12,6 +12,12 @@ def rescore(ctx: JobContext) -> dict:
         raise PermanentJobError("leads.rescore requires offering_id")
     with session_scope(ctx.engine) as session:
         try:
-            return rescore_offering(session, offering_id, actor="worker")
+            result = rescore_offering(session, offering_id, actor="worker")
+            from heatseeker_intelligence.pipeline import _queue_research_profiles
+
+            result.update(
+                _queue_research_profiles(session, ctx.settings, "lead-rescore", limit=25)
+            )
+            return result
         except LookupError as exc:
             raise PermanentJobError(str(exc)) from exc

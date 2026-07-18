@@ -69,6 +69,8 @@ HEADERS = (
     "capabilities",
     "classifications",
     "connection_count",
+    "research_status",
+    "research_completion",
     "profile_completeness",
     "entity_confidence",
     "profile_url",
@@ -94,7 +96,13 @@ def build_lead_workbook(session: Session, offering: Offering) -> bytes:
     for cell in sheet[1]:
         cell.font = Font(bold=True)
 
-    leads = lead_queue(session, offering.id, include_suppressed=False)
+    queue = lead_queue(session, offering.id, include_suppressed=False)
+    leads = [
+        lead
+        for lead in queue
+        if (lead.component_scores or {}).get("research_complete") is True
+    ]
+    researching_count = len(queue) - len(leads)
     for rank, lead in enumerate(leads, start=1):
         organisation = lead.organisation
         group = merge_group(session, organisation.id)
@@ -156,6 +164,8 @@ def build_lead_workbook(session: Session, offering: Offering) -> bytes:
                     for c in classifications
                 ),
                 len(edges_for(session, organisation.id)),
+                "complete",
+                components.get("research_completion", 0.0),
                 organisation.profile_completeness,
                 organisation.entity_confidence,
                 f"/entities/{organisation.id}",
@@ -179,6 +189,7 @@ def build_lead_workbook(session: Session, offering: Offering) -> bytes:
         ("Offering description", offering.description or ""),
         ("Rule version", SCORING_RULE_VERSION),
         ("Leads exported", len(leads)),
+        ("Candidates still researching", researching_count),
         (
             "Priority formula",
             "commercial_priority = (fit·{fit} + timing·{timing} + evidence·{evidence} "
@@ -195,6 +206,12 @@ def build_lead_workbook(session: Session, offering: Offering) -> bytes:
             "Provenance",
             "Every score derives from evidence-backed records; open a profile_url for "
             "field-level evidence and confidence.",
+        ),
+        (
+            "Research admission gate",
+            "Only companies with stable identity, official domain, specific location, "
+            "public contact route, business description, and evidenced relevance appear "
+            "on the Leads sheet. Sparse candidates remain in HeatSeeker's research queue.",
         ),
         ("No automatic outreach", "Contacting anyone is a human decision (§19.7)."),
         ("Target archetypes", _join(offering.target_archetype_ids)),

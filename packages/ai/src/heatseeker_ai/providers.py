@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Protocol
 
 from heatseeker_common.settings import Settings
+from pydantic import BaseModel
 
-from heatseeker_ai.contracts import SourceExpansionResult
+from heatseeker_ai.contracts import EntityWebResearchResult, SourceExpansionResult
 
 
 class ProviderError(RuntimeError):
@@ -42,7 +43,7 @@ class ProviderHealth:
 
 @dataclass(frozen=True, slots=True)
 class ProviderResult:
-    output: SourceExpansionResult
+    output: BaseModel
     raw_output: str
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -295,9 +296,9 @@ def _run_agent(
     return stdout, stderr
 
 
-def _json_result(value: str) -> SourceExpansionResult:
+def _json_result[T: BaseModel](value: str, result_type: type[T]) -> T:
     try:
-        return SourceExpansionResult.model_validate_json(value)
+        return result_type.model_validate_json(value)
     except Exception as exc:
         raise ProviderError(f"provider returned invalid structured output: {exc}") from exc
 
@@ -349,16 +350,41 @@ class CodexProvider:
         budgets: dict,
         cancelled: Callable[[], bool],
     ) -> ProviderResult:
+        return self._complete_typed(
+            prompt, SourceExpansionResult, "source-expansion", model, budgets, cancelled
+        )
+
+    def research_entity(
+        self,
+        prompt: str,
+        *,
+        model: str | None,
+        budgets: dict,
+        cancelled: Callable[[], bool],
+    ) -> ProviderResult:
+        return self._complete_typed(
+            prompt, EntityWebResearchResult, "entity-research", model, budgets, cancelled
+        )
+
+    def _complete_typed[T: BaseModel](
+        self,
+        prompt: str,
+        result_type: type[T],
+        schema_name: str,
+        model: str | None,
+        budgets: dict,
+        cancelled: Callable[[], bool],
+    ) -> ProviderResult:
         executable = _resolve_command(self.settings.ai_codex_command)
         if executable is None:
             raise ProviderError("Codex CLI is not installed")
         self.settings.ai_work_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=self.settings.ai_work_dir) as temp:
             workdir = Path(temp)
-            schema_path = workdir / "source-expansion.schema.json"
+            schema_path = workdir / f"{schema_name}.schema.json"
             output_path = workdir / "result.json"
             schema_path.write_text(
-                json.dumps(_codex_schema(SourceExpansionResult.model_json_schema())),
+                json.dumps(_codex_schema(result_type.model_json_schema())),
                 encoding="utf-8",
             )
             command = [
@@ -397,7 +423,7 @@ class CodexProvider:
                 raise ProviderError("Codex did not write its final structured result")
             raw = output_path.read_text(encoding="utf-8")
             return ProviderResult(
-                output=_json_result(raw), raw_output=raw, metadata={"log": stdout}
+                output=_json_result(raw, result_type), raw_output=raw, metadata={"log": stdout}
             )
 
 
@@ -415,11 +441,36 @@ class ClaudeProvider:
         budgets: dict,
         cancelled: Callable[[], bool],
     ) -> ProviderResult:
+        return self._complete_typed(
+            prompt, SourceExpansionResult, model=model, budgets=budgets, cancelled=cancelled
+        )
+
+    def research_entity(
+        self,
+        prompt: str,
+        *,
+        model: str | None,
+        budgets: dict,
+        cancelled: Callable[[], bool],
+    ) -> ProviderResult:
+        return self._complete_typed(
+            prompt, EntityWebResearchResult, model=model, budgets=budgets, cancelled=cancelled
+        )
+
+    def _complete_typed[T: BaseModel](
+        self,
+        prompt: str,
+        result_type: type[T],
+        *,
+        model: str | None,
+        budgets: dict,
+        cancelled: Callable[[], bool],
+    ) -> ProviderResult:
         executable = _resolve_command(self.settings.ai_claude_command)
         if executable is None:
             raise ProviderError("Claude Code CLI is not installed")
         self.settings.ai_work_dir.mkdir(parents=True, exist_ok=True)
-        schema = json.dumps(SourceExpansionResult.model_json_schema(), separators=(",", ":"))
+        schema = json.dumps(result_type.model_json_schema(), separators=(",", ":"))
         command = [
             executable,
             "-p",
@@ -463,7 +514,7 @@ class ClaudeProvider:
         if structured is None:
             result_value = wrapper.get("result")
             structured = json.loads(result_value) if isinstance(result_value, str) else result_value
-        output = SourceExpansionResult.model_validate(structured)
+        output = result_type.model_validate(structured)
         usage = wrapper.get("usage") or {}
         return ProviderResult(
             output=output,

@@ -18,9 +18,6 @@ from heatseeker_intelligence.company_profiles import verify_and_attach_domain
 
 # Australian business TLDs first (target market), then global fallbacks.
 _TLDS = ("com.au", "net.au", "au", "com")
-# Industry words that companies commonly append even when not in the registered name
-# (e.g. "Rovera Pty Ltd" → roverascaffolding.com.au).
-_INDUSTRY_SUFFIXES = ("scaffolding", "scaffold", "access", "group", "hire")
 _MAX_CANDIDATES = 12
 
 
@@ -38,11 +35,6 @@ def candidate_domains(name: str) -> list[str]:
 
     # Slug candidates in rough order of likelihood.
     slugs: list[str] = [full, hyphen, first_two]
-    # First word plus an industry word, for names that drop the trade from the entity.
-    already = set(tokens)
-    for suffix in _INDUSTRY_SUFFIXES:
-        if suffix not in already:
-            slugs.append(f"{first}{suffix}")
     slugs.append(first)
 
     seen: set[str] = set()

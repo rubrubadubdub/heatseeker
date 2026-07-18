@@ -4,16 +4,19 @@ import io
 
 import pytest
 from heatseeker_common.db import session_scope
+from heatseeker_common.models import Job
 from heatseeker_common.timeutil import utc_now
 from heatseeker_entity_resolution import entities
 from heatseeker_entity_resolution.models import ContactType
 from heatseeker_intelligence import capabilities, classifications, facts
 from heatseeker_intelligence.observations import record_observation
+from heatseeker_intelligence.pipeline import _queue_research_profiles
 from heatseeker_lead_intelligence import service
 from heatseeker_lead_intelligence.export import build_lead_workbook
 from heatseeker_lead_intelligence.models import OpportunityStage
 from heatseeker_lead_intelligence.scoring import score_organisation
 from openpyxl import load_workbook
+from sqlalchemy import select
 from test_intelligence_facts import make_document, make_source
 
 
@@ -225,3 +228,22 @@ def test_xlsx_export_full_columns_and_suppression(engine):
 def test_offering_validation(engine):
     with session_scope(engine) as session, pytest.raises(ValueError):
         service.create_offering(session, "   ")
+
+
+def test_sparse_leads_queue_gap_specific_research_without_duplicates(engine, settings):
+    with session_scope(engine) as session:
+        offering = _offering(session)
+        sparse = _classified_org(session, "Rovera Scaffolding Pty Limited", locality=None)
+        entities.add_identifier(session, sparse, "acn", "095140819")
+        service.rescore_offering(session, offering.id)
+        lead = service.lead_queue(session, offering.id)[0]
+        assert lead.opportunity_stage == OpportunityStage.RESEARCHING
+        assert lead.component_scores["missing_required_fields"]
+
+        first = _queue_research_profiles(session, settings, "test")
+        second = _queue_research_profiles(session, settings, "test")
+        assert first["profile_lookups_queued"] == 1
+        assert second["profile_lookups_queued"] == 0
+        job = session.scalars(select(Job).where(Job.job_type == "profiles.research")).one()
+        assert job.payload["organisation_id"] == sparse.id
+        assert job.payload["gap_signature"]

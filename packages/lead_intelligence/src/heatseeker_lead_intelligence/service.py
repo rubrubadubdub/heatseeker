@@ -4,6 +4,7 @@ from heatseeker_common import audit
 from heatseeker_common.timeutil import utc_now
 from heatseeker_entity_resolution.models import Organisation, OrganisationStatus
 from heatseeker_entity_resolution.resolution import canonical_id
+from heatseeker_intelligence.research_requirements import assess
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -144,7 +145,7 @@ def rescore_offering(
         ).scalars()
     }
 
-    counts = {"scored": 0, "suppressed": 0, "skipped": 0}
+    counts = {"scored": 0, "researching": 0, "suppressed": 0, "skipped": 0}
     for organisation in organisations:
         score = score_organisation(session, organisation, offering)
         if score.skip:
@@ -163,6 +164,14 @@ def rescore_offering(
         lead.accessibility_score = score.accessibility
         lead.relationship_score = score.relationship
         lead.component_scores = score.components
+        completion = assess(session, organisation)
+        lead.component_scores = {
+            **lead.component_scores,
+            "research_completion": completion.score,
+            "research_complete": completion.complete,
+            "missing_required_fields": list(completion.missing),
+            "research_signature": completion.signature,
+        }
         lead.reasons = score.reasons
         lead.risks = score.risks + (
             [f"suppressed: {rule.reason}" + (f" — {rule.note}" if rule.note else "")]
@@ -180,6 +189,16 @@ def rescore_offering(
         else:
             if lead.opportunity_stage == OpportunityStage.SUPPRESSED:
                 lead.opportunity_stage = OpportunityStage.IDENTIFIED
+            if completion.complete:
+                if lead.opportunity_stage == OpportunityStage.RESEARCHING:
+                    lead.opportunity_stage = OpportunityStage.IDENTIFIED
+            else:
+                lead.opportunity_stage = OpportunityStage.RESEARCHING
+                lead.next_action = {
+                    "type": "automated_research",
+                    "text": "HeatSeeker is researching: " + ", ".join(completion.missing),
+                }
+                counts["researching"] += 1
             lead.commercial_priority = score.commercial_priority
             counts["scored"] += 1
     session.flush()

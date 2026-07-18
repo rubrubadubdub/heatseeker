@@ -33,6 +33,7 @@ from heatseeker_intelligence.models import (
     FactAssertion,
     Observation,
 )
+from heatseeker_intelligence.research_requirements import assess
 
 PIPELINE_VERSION = "pipeline/0.1"
 
@@ -174,49 +175,69 @@ def advance(
         summary["match_scan"] = None
 
     summary["entities_refreshed"] = _refresh_stale_entities(session, max_entities)
-    summary["profile_fetches_queued"] = _queue_profile_fetches(session, actor)
+    summary.update(_queue_research_profiles(session, settings, actor))
     summary["lead_rescores_queued"] = _queue_lead_rescores(session, actor)
     session.flush()
     return summary
 
 
-def _queue_profile_fetches(session: Session, actor: str, limit: int = 25) -> int:
-    """Queue deterministic website profile fetches for organisations that have a
-    domain but no public contact route yet — the AI-free enrichment loop (§41.19)."""
-    from heatseeker_entity_resolution.models import ContactPoint, OrganisationDomain
+def _queue_research_profiles(
+    session: Session, settings: Settings, actor: str, limit: int = 25
+) -> dict:
+    """Queue one bounded next action per incomplete, high-priority lead candidate."""
+    try:
+        from heatseeker_lead_intelligence.models import AccountOpportunity, OpportunityStage
 
-    with_domain = select(OrganisationDomain.organisation_id).distinct()
-    with_contact = select(ContactPoint.organisation_id).distinct()
-    candidates = session.scalars(
-        select(Organisation.id)
-        .where(
-            Organisation.status != OrganisationStatus.MERGED,
-            Organisation.id.in_(with_domain),
-            Organisation.id.not_in(with_contact),
+        candidates = list(
+            session.scalars(
+                select(Organisation)
+                .join(AccountOpportunity, AccountOpportunity.organisation_id == Organisation.id)
+                .where(
+                    Organisation.status != OrganisationStatus.MERGED,
+                    AccountOpportunity.opportunity_stage != OpportunityStage.SUPPRESSED,
+                )
+                .order_by(AccountOpportunity.commercial_priority.desc())
+                .limit(limit * 4)
+            ).unique()
         )
-        .limit(limit * 3)
-    ).all()
-    queued = 0
-    for organisation_id in candidates:
-        if queued >= limit:
+    except ImportError:  # pragma: no cover
+        candidates = []
+    counts = {"profile_fetches_queued": 0, "profile_lookups_queued": 0}
+    for organisation in candidates:
+        if sum(counts.values()) >= limit:
             break
+        report = assess(session, organisation)
+        if report.complete:
+            continue
+        job_type = "profiles.fetch" if organisation.domains else "profiles.research"
         pending = session.scalars(
             select(Job.id).where(
-                Job.job_type == "profiles.fetch",
+                Job.job_type == job_type,
                 Job.status.in_(["queued", "running", "succeeded"]),
-                Job.payload["organisation_id"].as_string() == organisation_id,
+                Job.payload["organisation_id"].as_string() == organisation.id,
+                Job.payload["gap_signature"].as_string() == report.signature,
             )
         ).first()
-        if pending is None:
-            jobs.enqueue(
-                session,
-                "profiles.fetch",
-                payload={"organisation_id": organisation_id},
-                priority=PriorityClass.BACKGROUND_ENRICHMENT,
-                actor=actor,
-            )
-            queued += 1
-    return queued
+        if pending is not None:
+            continue
+        jobs.enqueue(
+            session,
+            job_type,
+            payload={
+                "organisation_id": organisation.id,
+                "gap_signature": report.signature,
+                "missing": list(report.missing),
+            },
+            priority=PriorityClass.BACKGROUND_ENRICHMENT,
+            actor=actor,
+        )
+        key = (
+            "profile_fetches_queued"
+            if job_type == "profiles.fetch"
+            else "profile_lookups_queued"
+        )
+        counts[key] += 1
+    return counts
 
 
 def _queue_lead_rescores(session: Session, actor: str) -> int:

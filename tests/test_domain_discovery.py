@@ -12,8 +12,6 @@ def test_candidate_domains_generation():
     assert "roverascaffolding.com.au" in hosts
     assert hosts.index("roverascaffolding.com.au") < hosts.index("roverascaffolding.com")
     assert "rovera-scaffolding.com.au" in hosts
-    # First-word + industry word covers names that drop the trade.
-    assert "roverascaffolding.com.au" in hosts
     assert candidate_domains("   ") == []
 
 

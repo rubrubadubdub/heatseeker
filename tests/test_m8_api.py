@@ -56,6 +56,8 @@ def test_offering_to_queue_to_export_roundtrip(engine, settings):
     assert lead["reasons"] and all("dimension" in r for r in lead["reasons"])
     assert any("M7" in u for u in lead["unknowns"])  # honest timing stub
     assert lead["component_scores"]["weights"]
+    assert lead["opportunity_stage"] == "researching"
+    assert lead["component_scores"]["research_complete"] is False
 
     exported = client.get("/api/leads/export.xlsx", params={"offering_id": offering_id})
     assert exported.status_code == 200
@@ -64,6 +66,7 @@ def test_offering_to_queue_to_export_roundtrip(engine, settings):
     )
     workbook = load_workbook(io.BytesIO(exported.content))
     assert {"Leads", "Method"} == set(workbook.sheetnames)
+    assert workbook["Leads"].max_row == 1  # sparse candidate is not delivered as a lead
 
     page = client.get(f"/leads?offering_id={offering_id}")
     assert page.status_code == 200

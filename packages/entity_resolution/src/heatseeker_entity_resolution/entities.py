@@ -197,7 +197,9 @@ def add_location(session: Session, **fields) -> Location:
 def set_primary_location(
     session: Session, organisation: Organisation, location: Location
 ) -> None:
-    organisation.primary_location_id = location.id
+    # Keep both the FK and the already-loaded relationship coherent. Profile research
+    # reassesses gaps in the same transaction immediately after discovering an address.
+    organisation.primary_location = location
     refresh_profile_completeness(session, organisation)
 
 

@@ -45,3 +45,34 @@ class SourceExpansionRequest(BaseModel):
     instructions: str = Field(default="", max_length=20_000)
     budgets: dict = Field(default_factory=dict)
     existing_domains: list[str] = Field(default_factory=list, max_length=10_000)
+
+
+class EntityPageCandidate(BaseModel):
+    """A public URL proposed for deterministic verification by HeatSeeker."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: HttpUrl
+    page_type: Literal[
+        "official_website",
+        "official_contact",
+        "official_services",
+        "official_location",
+        "official_registry",
+        "business_directory",
+        "public_profile",
+        "other",
+    ]
+    reasoning: str = Field(min_length=1, max_length=5000)
+    confidence: float = Field(ge=0, le=1)
+    matching_identifiers: list[str] = Field(default_factory=list, max_length=20)
+    supported_fields: list[str] = Field(default_factory=list, max_length=20)
+
+
+class EntityWebResearchResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(max_length=10_000)
+    queries_used: list[str] = Field(default_factory=list, max_length=50)
+    candidates: list[EntityPageCandidate] = Field(default_factory=list, max_length=50)
+    explicit_unknowns: list[str] = Field(default_factory=list, max_length=50)

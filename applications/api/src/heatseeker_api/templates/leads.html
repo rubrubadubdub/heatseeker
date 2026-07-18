@@ -7,7 +7,9 @@
   <strong>What this page is:</strong> companies ranked against one of <em>your
   offerings</em> — every score is explained, every explanation cites evidence, and
   nothing is ever contacted automatically. The loop: define an offering → rescore →
-  work the queue top-down → suppress anyone you shouldn't approach → export to XLSX.
+  let HeatSeeker finish the research queue → work completed leads top-down → suppress
+  anyone you shouldn't approach → export to XLSX. Sparse candidates are never exported
+  as finished leads.
   Timing scores stay neutral until M7 (news/events) lands.
 </div>
 
@@ -28,7 +30,7 @@
         <button class="btn btn-sm btn-outline-primary">Rescore</button>
       </form>
       <a href="/leads/{{ selected.id }}/export.xlsx" class="btn btn-sm btn-success">
-        ⬇ Export XLSX (full detail)</a>
+        ⬇ Export XLSX (research-complete)</a>
       <a href="/leads?offering_id={{ selected.id }}{{ '' if show_suppressed else '&show_suppressed=1' }}"
          class="btn btn-sm btn-outline-secondary">
         {{ 'Hide suppressed' if show_suppressed else 'Show suppressed' }}</a>
