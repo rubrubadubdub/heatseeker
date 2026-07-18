@@ -26,6 +26,8 @@ from heatseeker_industry_packs.models import PackRegistration
 from heatseeker_industry_packs.registry import register_pack
 from sqlalchemy import func, select
 
+from heatseeker_api import guidance
+
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -96,6 +98,13 @@ def dashboard(request: Request):
         )
         recent_jobs = list(session.scalars(select(Job).order_by(Job.created_at.desc()).limit(5)))
         packs = _pack_rows(session)
+        steps = guidance.next_steps(session)
+        last_advance = session.scalars(
+            select(Job)
+            .where(Job.job_type == "pipeline.advance")
+            .order_by(Job.created_at.desc())
+            .limit(1)
+        ).first()
         session.expunge_all()
     backups = backup_module.list_backups(settings)
     return _render(
@@ -108,6 +117,35 @@ def dashboard(request: Request):
         recent_jobs=recent_jobs,
         packs=packs,
         backups=backups[-3:][::-1],
+        steps=steps,
+        primary_step=guidance.primary_step(steps),
+        last_advance=last_advance,
+    )
+
+
+@router.post("/pipeline/advance")
+def pipeline_advance_action(request: Request):
+    """One-click 'do the next right thing' — chained deterministic steps as a job."""
+    engine = request.app.state.engine
+    with session_scope(engine) as session:
+        pending = session.scalars(
+            select(Job.id).where(
+                Job.job_type == "pipeline.advance", Job.status.in_(["queued", "running"])
+            )
+        ).first()
+        if pending is None:
+            jobs_module.enqueue(
+                session,
+                "pipeline.advance",
+                priority=PriorityClass.INTERACTIVE,
+                actor="user",
+            )
+    if pending is not None:
+        return _redirect("/", "A pipeline advance is already running", "info")
+    return _redirect(
+        "/",
+        "Pipeline advancing: collection tick, document processing backlog, duplicate "
+        "scan, and profile refresh — watch progress under Jobs",
     )
 
 

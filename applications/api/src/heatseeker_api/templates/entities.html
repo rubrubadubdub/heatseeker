@@ -12,6 +12,21 @@
     </a>
   </div>
 </div>
+<div class="alert alert-info py-2 small mb-3">
+  <strong>What this page is:</strong> every company the system knows about. The usual
+  loop:
+  <ol class="mb-1 mt-1">
+    <li><a href="/discovery">Import a dataset</a> (or let collection run) to grow this
+      list — you don't type companies in by hand unless you want to.</li>
+    <li><strong>Click a company</strong> to open its profile: every field shows its
+      evidence and confidence, and the “Research gaps” card tells you what's unknown.</li>
+    <li>When the <a href="/resolution">resolution queue</a> shows a badge, decide those
+      duplicate candidates — that's the one task only a human can do here.</li>
+  </ol>
+  “Scan for duplicates” and the search box below are the manual controls; the dashboard's
+  <em>Advance pipeline</em> button runs the scan for you.
+</div>
+
 <p class="small text-secondary">
   {{ counts.live }} live organisation{{ 's' if counts.live != 1 }}{% if counts.merged %}
   · {{ counts.merged }} merged (preserved, reversible){% endif %}. Legal entities and

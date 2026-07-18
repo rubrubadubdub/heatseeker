@@ -2,6 +2,23 @@
 {% block title %}Evidence · Heatseeker{% endblock %}
 {% block content %}
 <h1 class="h3 mb-2">Evidence</h1>
+
+<div class="alert alert-info py-2 small mb-3">
+  <strong>What this page is:</strong> the raw material — every document the system has
+  ever fetched or been given, kept unchanged so every fact can be traced back to its
+  source. <strong>You rarely need to act here.</strong>
+  <ul class="mb-1 mt-1">
+    <li>Evidence arrives on its own: the worker collects from
+      <a href="/sources">active sources</a>, and <a href="/discovery">dataset imports</a>
+      store their files here too.</li>
+    <li>Click a row when you want to answer “where did this fact come from?” — the
+      detail page shows the original bytes, extracted text, and access policy.</li>
+    <li>Nothing to see yet? <a href="/sources">Activate sources</a> or
+      <a href="/discovery">import a dataset</a>, or press <em>Advance pipeline</em> on
+      the <a href="/">dashboard</a>.</li>
+  </ul>
+</div>
+
 <p class="small text-secondary">Immutable raw documents, content-addressed by SHA-256.
 Every retrieval records the access policy it was collected under. Re-fetches of identical
 content bump the seen-count instead of duplicating. PDF, Office, text, and image evidence
